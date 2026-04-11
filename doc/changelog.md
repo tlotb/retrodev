@@ -1,3 +1,5 @@
+## Version 0.9.24144546
+
 
 
 * Fixed: Add / remove tilesets was broken due to changes to improve the usability (always show deleted tiles)
