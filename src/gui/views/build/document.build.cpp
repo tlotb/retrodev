@@ -70,14 +70,21 @@ namespace RetrodevGui {
 			if (files.empty()) {
 				ImGui::TextDisabled("No matching files found in project folder");
 			} else {
-				for (const auto& f : files) {
-					if (ImGui::Selectable(f.c_str())) {
-						std::snprintf(buf, bufSize, "%s", f.c_str());
-						str = buf;
-						changed = true;
-						ImGui::CloseCurrentPopup();
+				//
+				// Child window with fixed max height for scrolling when list is long
+				//
+				float maxHeight = ImGui::GetFontSize() * 20.0f;
+				if (ImGui::BeginChild("##FilePickerList", ImVec2(ImGui::GetFontSize() * 30.0f, maxHeight), false)) {
+					for (const auto& f : files) {
+						if (ImGui::Selectable(f.c_str())) {
+							std::snprintf(buf, bufSize, "%s", f.c_str());
+							str = buf;
+							changed = true;
+							ImGui::CloseCurrentPopup();
+						}
 					}
 				}
+				ImGui::EndChild();
 			}
 			ImGui::EndPopup();
 		}
@@ -119,24 +126,31 @@ namespace RetrodevGui {
 		if (ImGui::BeginPopup("##SourcePickerPopup")) {
 			std::vector<std::string> projectSources = RetrodevLib::Project::GetSourceFiles();
 			bool anyAvailable = false;
-			for (const auto& src : projectSources) {
-				bool alreadyAdded = false;
-				for (const auto& existing : params->sources) {
-					if (existing == src) {
-						alreadyAdded = true;
-						break;
+			//
+			// Child window with fixed max height for scrolling when list is long
+			//
+			float maxHeight = ImGui::GetFontSize() * 20.0f;
+			if (ImGui::BeginChild("##SourcePickerList", ImVec2(ImGui::GetFontSize() * 30.0f, maxHeight), false)) {
+				for (const auto& src : projectSources) {
+					bool alreadyAdded = false;
+					for (const auto& existing : params->sources) {
+						if (existing == src) {
+							alreadyAdded = true;
+							break;
+						}
+					}
+					if (alreadyAdded)
+						continue;
+					anyAvailable = true;
+					if (ImGui::Selectable(src.c_str())) {
+						params->sources.push_back(src);
+						RetrodevLib::Project::MarkAsModified();
+						SetModified(true);
+						ImGui::CloseCurrentPopup();
 					}
 				}
-				if (alreadyAdded)
-					continue;
-				anyAvailable = true;
-				if (ImGui::Selectable(src.c_str())) {
-					params->sources.push_back(src);
-					RetrodevLib::Project::MarkAsModified();
-					SetModified(true);
-					ImGui::CloseCurrentPopup();
-				}
 			}
+			ImGui::EndChild();
 			if (!anyAvailable)
 				ImGui::TextDisabled("No source files available");
 			ImGui::EndPopup();
@@ -201,24 +215,31 @@ namespace RetrodevGui {
 		if (ImGui::BeginPopup("##IncDirPickerPopup")) {
 			std::vector<std::string> projectFolders = RetrodevLib::Project::GetProjectFolders();
 			bool anyAvailable = false;
-			for (const auto& folder : projectFolders) {
-				bool alreadyAdded = false;
-				for (const auto& existing : params->includeDirs) {
-					if (existing == folder) {
-						alreadyAdded = true;
-						break;
+			//
+			// Child window with fixed max height for scrolling when list is long
+			//
+			float maxHeight = ImGui::GetFontSize() * 20.0f;
+			if (ImGui::BeginChild("##IncDirPickerList", ImVec2(ImGui::GetFontSize() * 30.0f, maxHeight), false)) {
+				for (const auto& folder : projectFolders) {
+					bool alreadyAdded = false;
+					for (const auto& existing : params->includeDirs) {
+						if (existing == folder) {
+							alreadyAdded = true;
+							break;
+						}
+					}
+					if (alreadyAdded)
+						continue;
+					anyAvailable = true;
+					if (ImGui::Selectable(folder.c_str())) {
+						params->includeDirs.push_back(folder);
+						RetrodevLib::Project::MarkAsModified();
+						SetModified(true);
+						ImGui::CloseCurrentPopup();
 					}
 				}
-				if (alreadyAdded)
-					continue;
-				anyAvailable = true;
-				if (ImGui::Selectable(folder.c_str())) {
-					params->includeDirs.push_back(folder);
-					RetrodevLib::Project::MarkAsModified();
-					SetModified(true);
-					ImGui::CloseCurrentPopup();
-				}
 			}
+			ImGui::EndChild();
 			if (!anyAvailable)
 				ImGui::TextDisabled("No folders available");
 			ImGui::EndPopup();
@@ -316,45 +337,57 @@ namespace RetrodevGui {
 		if (ImGui::Button(ICON_PLUS " Add##Dep"))
 			ImGui::OpenPopup("##DepPickerPopup");
 		//
-		// Dependency picker popup: lists all build items (bitmaps, tilesets, sprites, maps, palettes)
-		// not already present in the dependency list
+		// Dependency picker popup: lists all build items (bitmaps, tilesets, sprites, maps, palettes, builds)
+		// not already present in the dependency list and that don't create circular or diamond dependencies
 		//
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
 		if (ImGui::BeginPopup("##DepPickerPopup")) {
 			static const RetrodevLib::ProjectBuildType k_depTypes[] = {
 				RetrodevLib::ProjectBuildType::Bitmap, RetrodevLib::ProjectBuildType::Tilemap, RetrodevLib::ProjectBuildType::Sprite,
-				RetrodevLib::ProjectBuildType::Map,	   RetrodevLib::ProjectBuildType::Palette,
+				RetrodevLib::ProjectBuildType::Map,	   RetrodevLib::ProjectBuildType::Palette,  RetrodevLib::ProjectBuildType::Build,
 			};
-			static const char* k_depTypeLabels[] = {"Bitmap", "Tileset", "Sprite", "Map", "Palette"};
+			static const char* k_depTypeLabels[] = {"Bitmap", "Tileset", "Sprite", "Map", "Palette", "Build"};
 			bool anyAvailable = false;
-			for (int t = 0; t < 5; t++) {
-				std::vector<std::string> items = RetrodevLib::Project::GetBuildItemsByType(k_depTypes[t]);
-				for (const auto& item : items) {
-					//
-					// Skip items already in the dependency list
-					//
-					bool alreadyAdded = false;
-					for (const auto& existing : params->dependencies) {
-						if (existing == item) {
-							alreadyAdded = true;
-							break;
+			//
+			// Child window with fixed max height for scrolling when list is long
+			//
+			float maxHeight = ImGui::GetFontSize() * 20.0f;
+			if (ImGui::BeginChild("##DepPickerList", ImVec2(ImGui::GetFontSize() * 30.0f, maxHeight), false)) {
+				for (int t = 0; t < 6; t++) {
+					std::vector<std::string> items = RetrodevLib::Project::GetBuildItemsByType(k_depTypes[t]);
+					for (const auto& item : items) {
+						//
+						// Skip items already in the dependency list
+						//
+						bool alreadyAdded = false;
+						for (const auto& existing : params->dependencies) {
+							if (existing == item) {
+								alreadyAdded = true;
+								break;
+							}
 						}
-					}
-					if (alreadyAdded)
-						continue;
-					anyAvailable = true;
-					//
-					// Show label: "name  [Type]" so the user can distinguish between items with the same name
-					//
-					std::string displayName = item + "  [" + k_depTypeLabels[t] + "]";
-					if (ImGui::Selectable(displayName.c_str())) {
-						params->dependencies.push_back(item);
-						RetrodevLib::Project::MarkAsModified();
-						SetModified(true);
-						ImGui::CloseCurrentPopup();
+						if (alreadyAdded)
+							continue;
+						//
+						// Skip items that would create circular or diamond dependencies
+						//
+						if (!RetrodevLib::Project::BuildCanAddDependency(m_name, item))
+							continue;
+						anyAvailable = true;
+						//
+						// Show label: "name  [Type]" so the user can distinguish between items with the same name
+						//
+						std::string displayName = item + "  [" + k_depTypeLabels[t] + "]";
+						if (ImGui::Selectable(displayName.c_str())) {
+							params->dependencies.push_back(item);
+							RetrodevLib::Project::MarkAsModified();
+							SetModified(true);
+							ImGui::CloseCurrentPopup();
+						}
 					}
 				}
 			}
+			ImGui::EndChild();
 			if (!anyAvailable)
 				ImGui::TextDisabled("No build items available");
 			ImGui::EndPopup();

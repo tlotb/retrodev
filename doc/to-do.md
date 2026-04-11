@@ -5,7 +5,6 @@
 * Add support for more systems (its prepared but only Amstrad is defined)
 * Add more examples
 * Add more common reusable code and macros for the SDK folder
-  * Who said 8BP or CPCTelera?
 * Add support for other building tools (like SDCC but not integrated, this app is NON GPL)
 * Add support for Amstrad extended modes conversions
   * EGX1
@@ -23,4 +22,3 @@
     * This is something that may be true (graphics participating two zones but is unsolved)
 * Optimizations
   * Palette solver can be optimized
-

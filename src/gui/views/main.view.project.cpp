@@ -109,6 +109,12 @@ namespace RetrodevGui {
 	static std::string g_renameVirtualFolderOldPath;
 	static char g_renameVirtualFolderNameBuf[256] = "";
 	//
+	// Rename Folder (filesystem) dialog state
+	//
+	static bool g_showRenameFolderDialog = false;
+	static std::filesystem::path g_renameFolderOldPath;
+	static char g_renameFolderNameBuf[256] = "";
+	//
 	// New Folder dialog state
 	//
 	static bool g_showNewFolderDialog = false;
@@ -129,11 +135,21 @@ namespace RetrodevGui {
 	static int g_newImageWidth = 320;
 	static int g_newImageHeight = 200;
 	//
-	// Drag and drop payload for moving build items between virtual folders
+	// Tracks whether a modal was just opened so we can autofocus its first InputText
+	//
+	static bool g_popupJustOpened = false;
+	//
+	// Drag and drop payload for build items
 	//
 	struct BuildItemDragPayload {
 		char buildItemPath[512];
 		RetrodevLib::ProjectBuildType buildItemType;
+	};
+	//
+	// Drag and drop payload for files
+	//
+	struct FileDragPayload {
+		char filePath[512];
 	};
 	//
 	// Return the absolute path to the sdk folder next to the executable, or empty if it does not exist.
@@ -354,6 +370,20 @@ namespace RetrodevGui {
 					g_showNewImageDialog = true;
 				}
 				ImGui::EndMenu();
+			}
+			//
+			// Rename is available for any non-root filesystem folder
+			//
+			if (!node.isRoot) {
+				ImGui::Separator();
+				if (ImGui::MenuItem(ICON_PENCIL " Rename Folder...")) {
+					g_renameFolderOldPath = node.fullPath;
+					std::string leafName = node.fullPath.filename().string();
+					memset(g_renameFolderNameBuf, 0, sizeof(g_renameFolderNameBuf));
+					if (leafName.size() < sizeof(g_renameFolderNameBuf))
+						memcpy(g_renameFolderNameBuf, leafName.c_str(), leafName.size());
+					g_showRenameFolderDialog = true;
+				}
 			}
 			ImGui::Separator();
 			bool hasProjectFiles = false;
@@ -837,11 +867,13 @@ namespace RetrodevGui {
 				accPath += '/';
 			accPath += part;
 			//
-			// Try to find existing child with this name
+			// Try to find existing child with this name AND matching type
+			// (we want both a folder and a build item with the same name to coexist)
 			//
+			bool wantDirectory = !isLast || !isBuildItem;
 			FileTreeNode* found = nullptr;
 			for (auto& child : currentNode->children) {
-				if (child.name == part) {
+				if (child.name == part && child.isDirectory == wantDirectory) {
 					found = &child;
 					break;
 				}
@@ -963,8 +995,15 @@ namespace RetrodevGui {
 			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.25f);
 		}
 
-		// Create unique ID from the full path
-		ImGui::PushID(node.fullPath.string().c_str());
+		// Create unique ID: use buildItemPath for build section nodes, fullPath for filesystem nodes
+		// Prefix with type indicator to ensure folders and build items with the same name get different IDs
+		std::string uniqueId;
+		if (node.inBuildSection) {
+			uniqueId = node.isBuildItem ? "B:" + node.buildItemPath : "F:" + node.buildItemPath;
+		} else {
+			uniqueId = node.fullPath.string();
+		}
+		ImGui::PushID(uniqueId.c_str());
 
 		//
 		// Render the tree node
@@ -1003,6 +1042,118 @@ namespace RetrodevGui {
 				ImGui::SetDragDropPayload("BUILD_ITEM", &payload, sizeof(payload));
 				ImGui::Text("%s %s", icon, node.name.c_str());
 				ImGui::EndDragDropSource();
+			}
+		}
+		//
+		// Drag source: regular files can be dragged to other folders
+		//
+		if (!node.isDirectory && !node.isBuildItem && node.inProject) {
+			if (ImGui::BeginDragDropSource()) {
+				FileDragPayload payload = {};
+				std::string filePathStr = node.fullPath.string();
+				size_t pathLen = filePathStr.size();
+				if (pathLen >= sizeof(payload.filePath))
+					pathLen = sizeof(payload.filePath) - 1;
+				memcpy(payload.filePath, filePathStr.c_str(), pathLen);
+				payload.filePath[pathLen] = '\0';
+				ImGui::SetDragDropPayload("FILE_ITEM", &payload, sizeof(payload));
+				ImGui::Text("%s %s", icon, node.name.c_str());
+				ImGui::EndDragDropSource();
+			}
+		}
+		//
+		// Drop target: filesystem directories accept dragged files
+		//
+		if (node.isDirectory && !node.inBuildSection) {
+			if (ImGui::BeginDragDropTarget()) {
+				if (const ImGuiPayload* accepted = ImGui::AcceptDragDropPayload("FILE_ITEM")) {
+					const FileDragPayload* data = static_cast<const FileDragPayload*>(accepted->Data);
+					std::filesystem::path oldPath = data->filePath;
+					std::filesystem::path newPath = node.fullPath / oldPath.filename();
+					if (oldPath != newPath && oldPath != node.fullPath) {
+						std::string oldPathStr = oldPath.lexically_normal().string();
+						std::string newPathStr = newPath.lexically_normal().string();
+						//
+						// Query all build items once at the beginning
+						//
+						std::vector<std::string> bitmaps = RetrodevLib::Project::GetBuildItemsByType(RetrodevLib::ProjectBuildType::Bitmap);
+						std::vector<std::string> tilesets = RetrodevLib::Project::GetBuildItemsByType(RetrodevLib::ProjectBuildType::Tilemap);
+						std::vector<std::string> sprites = RetrodevLib::Project::GetBuildItemsByType(RetrodevLib::ProjectBuildType::Sprite);
+						//
+						// Check if this file is used by any build items
+						//
+						bool hasReferences = false;
+						for (const auto& name : bitmaps) {
+							std::string src = RetrodevLib::Project::BitmapGetSourcePath(name);
+							std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+							if (srcNorm == oldPath) {
+								hasReferences = true;
+								break;
+							}
+						}
+						if (!hasReferences) {
+							for (const auto& name : tilesets) {
+								std::string src = RetrodevLib::Project::TilesetGetSourcePath(name);
+								std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+								if (srcNorm == oldPath) {
+									hasReferences = true;
+									break;
+								}
+							}
+						}
+						if (!hasReferences) {
+							for (const auto& name : sprites) {
+								std::string src = RetrodevLib::Project::SpriteGetSourcePath(name);
+								std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+								if (srcNorm == oldPath) {
+									hasReferences = true;
+									break;
+								}
+							}
+						}
+						//
+						// Move the physical file first
+						//
+						std::error_code ec;
+						std::filesystem::rename(oldPath, newPath, ec);
+						if (!ec) {
+							//
+							// Update the file entry in the project (remove old, add new)
+							//
+							RetrodevLib::ProjectFileType fileType = GetFileType(oldPath);
+							RetrodevLib::Project::RemoveFile(oldPathStr);
+							RetrodevLib::Project::AddFile(newPathStr, fileType);
+							//
+							// Update all build items that reference this file
+							//
+							if (hasReferences) {
+								for (const auto& name : bitmaps) {
+									std::string src = RetrodevLib::Project::BitmapGetSourcePath(name);
+									std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+									if (srcNorm == oldPath)
+										RetrodevLib::Project::BitmapSetSourcePath(name, newPathStr);
+								}
+								for (const auto& name : tilesets) {
+									std::string src = RetrodevLib::Project::TilesetGetSourcePath(name);
+									std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+									if (srcNorm == oldPath)
+										RetrodevLib::Project::TilesetSetSourcePath(name, newPathStr);
+								}
+								for (const auto& name : sprites) {
+									std::string src = RetrodevLib::Project::SpriteGetSourcePath(name);
+									std::filesystem::path srcNorm = std::filesystem::path(src).lexically_normal();
+									if (srcNorm == oldPath)
+										RetrodevLib::Project::SpriteSetSourcePath(name, newPathStr);
+								}
+							}
+							AppConsole::AddLogF(AppConsole::LogLevel::Info, "Moved file: %s -> %s", oldPathStr.c_str(), newPathStr.c_str());
+							g_forceProjectTreeRebuild = true;
+						} else {
+							AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Failed to move file: %s", ec.message().c_str());
+						}
+					}
+				}
+				ImGui::EndDragDropTarget();
 			}
 		}
 		//
@@ -1288,13 +1439,28 @@ namespace RetrodevGui {
 		if (g_showNewMapDialog) {
 			ImGui::OpenPopup("New Map");
 			g_showNewMapDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Map", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("Map name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewMapName", g_newMapNameBuf, sizeof(g_newMapNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewMapName", g_newMapNameBuf, sizeof(g_newMapNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newMapNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				if (RetrodevLib::Project::MapAdd(g_newMapNameBuf)) {
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created map: %s", g_newMapNameBuf);
+					g_forceProjectTreeRebuild = true;
+					g_pendingScrollToBuildItem = g_newMapNameBuf;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Map already exists: %s", g_newMapNameBuf);
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				if (RetrodevLib::Project::MapAdd(g_newMapNameBuf)) {
@@ -1316,13 +1482,28 @@ namespace RetrodevGui {
 		if (g_showNewBuildDialog) {
 			ImGui::OpenPopup("New Build");
 			g_showNewBuildDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Build", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("Build name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewBuildName", g_newBuildNameBuf, sizeof(g_newBuildNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewBuildName", g_newBuildNameBuf, sizeof(g_newBuildNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newBuildNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				if (RetrodevLib::Project::BuildAdd(g_newBuildNameBuf)) {
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created build: %s", g_newBuildNameBuf);
+					g_forceProjectTreeRebuild = true;
+					g_pendingScrollToBuildItem = g_newBuildNameBuf;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Build already exists: %s", g_newBuildNameBuf);
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				if (RetrodevLib::Project::BuildAdd(g_newBuildNameBuf)) {
@@ -1347,13 +1528,29 @@ namespace RetrodevGui {
 		if (g_showNewFolderDialog) {
 			ImGui::OpenPopup("New Folder");
 			g_showNewFolderDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("Folder name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewFolderName", g_newFolderNameBuf, sizeof(g_newFolderNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewFolderName", g_newFolderNameBuf, sizeof(g_newFolderNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newFolderNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				std::filesystem::path newFolder = std::filesystem::path(g_newFolderParentPath) / g_newFolderNameBuf;
+				std::error_code ec;
+				if (std::filesystem::create_directory(newFolder, ec)) {
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created folder: %s", newFolder.string().c_str());
+					g_forceProjectTreeRebuild = true;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Failed to create folder: %s", newFolder.string().c_str());
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				std::filesystem::path newFolder = std::filesystem::path(g_newFolderParentPath) / g_newFolderNameBuf;
@@ -1379,13 +1576,31 @@ namespace RetrodevGui {
 		if (g_showNewFileDialog) {
 			ImGui::OpenPopup("New Source File");
 			g_showNewFileDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Source File", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("File name (include extension, e.g. main.asm):");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewFileName", g_newFileNameBuf, sizeof(g_newFileNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewFileName", g_newFileNameBuf, sizeof(g_newFileNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newFileNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				std::filesystem::path newFile = std::filesystem::path(g_newFileParentPath) / g_newFileNameBuf;
+				std::ofstream ofs(newFile);
+				if (ofs.is_open()) {
+					ofs.close();
+					RetrodevLib::Project::AddFile(newFile.string(), GetFileType(newFile));
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created file: %s", newFile.string().c_str());
+					g_forceProjectTreeRebuild = true;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Failed to create file: %s", newFile.string().c_str());
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				std::filesystem::path newFile = std::filesystem::path(g_newFileParentPath) / g_newFileNameBuf;
@@ -1413,12 +1628,17 @@ namespace RetrodevGui {
 		if (g_showNewImageDialog) {
 			ImGui::OpenPopup("New Image");
 			g_showNewImageDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Image", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("Image name (without extension):");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewImageName", g_newImageNameBuf, sizeof(g_newImageNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewImageName", g_newImageNameBuf, sizeof(g_newImageNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			ImGui::Text("Resolution:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
 			ImGui::InputInt("Width##ImgW", &g_newImageWidth, 0);
@@ -1437,6 +1657,18 @@ namespace RetrodevGui {
 			if (g_newImageHeight > 4096)
 				g_newImageHeight = 4096;
 			bool nameValid = g_newImageNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				std::filesystem::path newImg = std::filesystem::path(g_newImageParentPath) / (std::string(g_newImageNameBuf) + ".png");
+				auto img = RetrodevLib::Image::ImageCreate(g_newImageWidth, g_newImageHeight, true);
+				if (img && img->Save(newImg.string())) {
+					RetrodevLib::Project::AddFile(newImg.string(), RetrodevLib::ProjectFileType::Image);
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created image: %s (%dx%d, 256 colours)", newImg.string().c_str(), g_newImageWidth, g_newImageHeight);
+					g_forceProjectTreeRebuild = true;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Failed to create image: %s", newImg.string().c_str());
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				std::filesystem::path newImg = std::filesystem::path(g_newImageParentPath) / (std::string(g_newImageNameBuf) + ".png");
@@ -1463,14 +1695,29 @@ namespace RetrodevGui {
 		if (g_showNewPaletteDialog) {
 			ImGui::OpenPopup("New Palette");
 			g_showNewPaletteDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Palette", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Palette name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewPaletteName", g_newPaletteNameBuf, sizeof(g_newPaletteNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewPaletteName", g_newPaletteNameBuf, sizeof(g_newPaletteNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newPaletteNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				if (RetrodevLib::Project::PaletteAdd(g_newPaletteNameBuf)) {
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created palette: %s", g_newPaletteNameBuf);
+					g_forceProjectTreeRebuild = true;
+					g_pendingScrollToBuildItem = g_newPaletteNameBuf;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Palette already exists: %s", g_newPaletteNameBuf);
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				if (RetrodevLib::Project::PaletteAdd(g_newPaletteNameBuf)) {
@@ -1495,14 +1742,32 @@ namespace RetrodevGui {
 		if (g_showNewVirtualFolderDialog) {
 			ImGui::OpenPopup("New Virtual Folder");
 			g_showNewVirtualFolderDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("New Virtual Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Folder name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##NewVirtualFolderName", g_newVirtualFolderNameBuf, sizeof(g_newVirtualFolderNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##NewVirtualFolderName", g_newVirtualFolderNameBuf, sizeof(g_newVirtualFolderNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_newVirtualFolderNameBuf[0] != '\0';
+			if (enterPressed && nameValid) {
+				//
+				// Build the full virtual path: parent + "/" + name (skip leading "/" when parent is root/empty)
+				//
+				std::string fullPath = g_newVirtualFolderParentPath.empty() ? g_newVirtualFolderNameBuf : g_newVirtualFolderParentPath + "/" + g_newVirtualFolderNameBuf;
+				if (RetrodevLib::Project::FolderAdd(fullPath)) {
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Created virtual folder: %s", fullPath.c_str());
+					g_forceProjectTreeRebuild = true;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Virtual folder already exists: %s", fullPath.c_str());
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::BeginDisabled(!nameValid);
 			if (ImGui::Button("Create", ImVec2(80.0f, 0.0f))) {
 				//
@@ -1530,16 +1795,23 @@ namespace RetrodevGui {
 		if (g_showRenameVirtualFolderDialog) {
 			ImGui::OpenPopup("Rename Folder");
 			g_showRenameVirtualFolderDialog = false;
+			g_popupJustOpened = true;
 		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
 		if (ImGui::BeginPopupModal("Rename Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("New folder name:");
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
-			ImGui::InputText("##RenameFolderName", g_renameVirtualFolderNameBuf, sizeof(g_renameVirtualFolderNameBuf));
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##RenameFolderName", g_renameVirtualFolderNameBuf, sizeof(g_renameVirtualFolderNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
 			bool nameValid = g_renameVirtualFolderNameBuf[0] != '\0';
 			ImGui::BeginDisabled(!nameValid);
-			if (ImGui::Button("Rename", ImVec2(80.0f, 0.0f))) {
+			bool doRename = ImGui::Button("Rename", ImVec2(80.0f, 0.0f));
+			ImGui::EndDisabled();
+			if ((doRename || (enterPressed && nameValid))) {
 				//
 				// Compute new full path: same parent prefix, new leaf name
 				//
@@ -1589,7 +1861,52 @@ namespace RetrodevGui {
 				}
 				ImGui::CloseCurrentPopup();
 			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(80.0f, 0.0f)))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
+		ImGui::PopStyleVar();
+		//
+		// Rename Folder (filesystem) modal
+		//
+		if (g_showRenameFolderDialog) {
+			ImGui::OpenPopup("Rename Folder##fs");
+			g_showRenameFolderDialog = false;
+			g_popupJustOpened = true;
+		}
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 12.0f));
+		if (ImGui::BeginPopupModal("Rename Folder##fs", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("New folder name:");
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
+			if (g_popupJustOpened) {
+				ImGui::SetKeyboardFocusHere();
+				g_popupJustOpened = false;
+			}
+			bool enterPressed = ImGui::InputText("##RenameFolderFsName", g_renameFolderNameBuf, sizeof(g_renameFolderNameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+			bool nameValid = g_renameFolderNameBuf[0] != '\0';
+			ImGui::BeginDisabled(!nameValid);
+			bool doRename = ImGui::Button("Rename", ImVec2(80.0f, 0.0f));
 			ImGui::EndDisabled();
+			if (doRename || (enterPressed && nameValid)) {
+				std::filesystem::path newPath = g_renameFolderOldPath.parent_path() / g_renameFolderNameBuf;
+				std::error_code ec;
+				std::filesystem::rename(g_renameFolderOldPath, newPath, ec);
+				if (!ec) {
+					//
+					// Update any project files whose paths fall under the renamed folder
+					//
+					std::string oldPrefix = g_renameFolderOldPath.string();
+					std::string newPrefix = newPath.string();
+					RetrodevLib::Project::RenameFilesWithPrefix(oldPrefix, newPrefix);
+					AppConsole::AddLogF(AppConsole::LogLevel::Info, "Renamed folder: %s -> %s", oldPrefix.c_str(), newPrefix.c_str());
+					g_forceProjectTreeRebuild = true;
+				} else {
+					AppConsole::AddLogF(AppConsole::LogLevel::Warning, "Failed to rename folder: %s", ec.message().c_str());
+				}
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel", ImVec2(80.0f, 0.0f)))
 				ImGui::CloseCurrentPopup();

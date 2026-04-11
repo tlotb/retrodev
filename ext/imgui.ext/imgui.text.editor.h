@@ -914,6 +914,14 @@ namespace ImGui {
 		std::vector<unsigned char> mTimingTextCacheValid;		  // Per-line timing cache validity flags.
 		std::vector<std::string> mBytecodeTextCache;			  // Per-line cached bytecode text.
 		std::vector<unsigned char> mBytecodeTextCacheValid;		  // Per-line bytecode cache validity flags.
+		//
+		// Cached total codelens lane height for all document lines (sum of codeLensLaneHeight
+		// for every line that has a codelens annotation). Used to correctly size the
+		// virtual scroll area and to compute cursor-scroll targets.
+		//
+		mutable float mTotalCodeLensHeight = 0.0f;    // Sum of codelens lane heights across all lines.
+		mutable int mTotalCodeLensVersion = -1;       // sCodeLensDataVersion at the time of last recompute.
+		mutable bool mTotalCodeLensDirty = true;      // Set when document content or path changes.
 		// -----------------------------------------------------------------------
 		// Deferred scroll and cursor-visibility requests applied on the next Render call
 		// -----------------------------------------------------------------------
@@ -938,6 +946,15 @@ namespace ImGui {
 		int mFirstVisibleLine = 0;	 // Index of the first line currently visible in the scroll viewport.
 		int mLastVisibleLine = 0;	 // Index of the last line currently visible in the scroll viewport.
 		int mVisibleLineCount = 0;	 // Number of lines that fit in the viewport.
+		float mFirstVisibleLineYOffset = 0.0f; // Accumulated codelens lane height above mFirstVisibleLine (for render loop init).
+		//
+		// Per-line cumulative Y cache: mLineTopYCache[i] = document-space Y of the top of line i.
+		// mLineTopYCache[lineCount] = total document height. Rebuilt only when dirty.
+		//
+		std::vector<float> mLineTopYCache;
+		int mLineTopYCacheVersion = -1;       // sCodeLensDataVersion at last rebuild (-1 = never built).
+		int mLineTopYCacheLineCount = 0;      // mLines.size() at last rebuild.
+		float mLineTopYCacheCharAdvanceY = 0.0f; // mCharAdvance.y at last rebuild; invalidates on font-size change.
 		int mFirstVisibleColumn = 0; // Visual column of the leftmost visible character.
 		int mLastVisibleColumn = 0;	 // Visual column of the rightmost visible character.
 		int mVisibleColumnCount = 0; // Number of columns that fit in the viewport.
@@ -1065,9 +1082,20 @@ namespace ImGui {
 		static bool sCodeLensActiveParseInProgress;
 		static bool sCodeLensActiveSymbolsCleared;
 		//
+		// Incremented whenever the global codelens symbol table changes (parse complete,
+		// symbol deleted, data cleared). Each editor compares against its cached version
+		// to detect when mTotalCodeLensHeight must be recomputed.
+		//
+		static int sCodeLensDataVersion;
+		//
 		// Returns the language definition singleton for the given id, or nullptr for None.
 		//
 		static const LanguageDefinition* GetLanguageDefinitionForId(LanguageDefinitionId aId);
+		//
+		// Returns true when line aLine has a codelens annotation in the current codelens data.
+		// aCurrentFilePath must be the normalized document path (NormalizePath applied).
+		//
+		bool ComputeLineHasCodeLens(int aLine, const std::string& aCurrentFilePath) const;
 	};
 
 } // namespace ImGui

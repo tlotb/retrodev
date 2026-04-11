@@ -1,3 +1,22 @@
+
+
+* Fixed: Add / remove tilesets was broken due to changes to improve the usability (always show deleted tiles)
+* Fixed: In the exporters, last option in comboboxes was always not recognized
+* Fixed: Text editor, cursor going offscreen due to inserted codelens
+* Fixed: Cursor getting at the start of the file when ctrl+s
+* Fixed: Text editor receiving input even if a dialog box was on top
+* Fixed: File drag-and-drop now correctly updates build item source paths
+* Fixed: Collisions in project tree between build items and folders with the same name
+* Added: Folder renaming for file tree
+* Added: Drag and drop to move files between folders
+* Added: Build items can now depend on other build items for multi-stage builds
+  - Supports dependency chains (e.g., kernel → game → final)
+  - Circular dependency detection prevents A→B→A cycles
+  - Diamond dependency detection prevents multiple paths to the same item
+  - Each build dependency is fully assembled before the dependent build executes
+  - Invalid dependencies are automatically filtered from the picker UI
+
+
 ## Version 0.9.24124993
 
 

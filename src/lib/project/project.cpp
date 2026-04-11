@@ -18,7 +18,9 @@
 #include <export/export.h>
 #include <assets/palette/palette.h>
 #include <process/image/tile.pack.h>
+#include <assets/source/source.h>
 #include <algorithm>
+#include <unordered_set>
 
 namespace RetrodevLib {
 	//
@@ -754,6 +756,25 @@ namespace RetrodevLib {
 		return false;
 	}
 	//
+	// Update the source file path for a bitmap build item.
+	// Returns false if no project is open or the bitmap name does not exist.
+	//
+	bool Project::BitmapSetSourcePath(const std::string& name, const std::string& newSourceFilePath) {
+		if (!isProjectOpen)
+			return false;
+		//
+		// Find bitmap by name and update its source file path
+		//
+		for (auto& entry : currentProject.buildBitmaps) {
+			if (entry.name == name) {
+				entry.sourceFilePath = toRelativePath(newSourceFilePath);
+				isProjectModified = true;
+				return true;
+			}
+		}
+		return false;
+	}
+	//
 	// Get the source file path for a tileset build item
 	//
 	std::string Project::TilesetGetSourcePath(const std::string& name) {
@@ -903,6 +924,25 @@ namespace RetrodevLib {
 		return false;
 	}
 	//
+	// Update the source file path for a tileset build item.
+	// Returns false if no project is open or the tileset name does not exist.
+	//
+	bool Project::TilesetSetSourcePath(const std::string& name, const std::string& newSourceFilePath) {
+		if (!isProjectOpen)
+			return false;
+		//
+		// Find tileset by name and update its source file path
+		//
+		for (auto& entry : currentProject.buildTiles) {
+			if (entry.name == name) {
+				entry.sourceFilePath = toRelativePath(newSourceFilePath);
+				isProjectModified = true;
+				return true;
+			}
+		}
+		return false;
+	}
+	//
 	// Get the source file path for a sprite build item
 	//
 	std::string Project::SpriteGetSourcePath(const std::string& name) {
@@ -1017,6 +1057,25 @@ namespace RetrodevLib {
 		for (auto& entry : currentProject.buildSprites) {
 			if (entry.name == oldName) {
 				entry.name = newName;
+				isProjectModified = true;
+				return true;
+			}
+		}
+		return false;
+	}
+	//
+	// Update the source file path for a sprite build item.
+	// Returns false if no project is open or the sprite name does not exist.
+	//
+	bool Project::SpriteSetSourcePath(const std::string& name, const std::string& newSourceFilePath) {
+		if (!isProjectOpen)
+			return false;
+		//
+		// Find sprite by name and update its source file path
+		//
+		for (auto& entry : currentProject.buildSprites) {
+			if (entry.name == name) {
+				entry.sourceFilePath = toRelativePath(newSourceFilePath);
 				isProjectModified = true;
 				return true;
 			}
@@ -1501,11 +1560,120 @@ namespace RetrodevLib {
 							continue;
 						}
 					}
+					//
+					// Build dependency: recursively process the dependency build's own dependencies, then execute it
+					//
+					{
+						SourceParams* depBuildParams = nullptr;
+						if (BuildGetParams(depName, &depBuildParams) && depBuildParams != nullptr) {
+							Log::Info(LogChannel::Build, "[Dep] Build '%s': processing dependencies.", depName.c_str());
+							//
+							// Recursive call: process the dependency build's dependencies first
+							//
+							if (!BuildProcessDependencies(depName)) {
+								Log::Error(LogChannel::Build, "[Dep] Build '%s': dependency processing failed.", depName.c_str());
+								return false;
+							}
+							//
+							// Now actually build/assemble the dependency build item itself
+							//
+							Log::Info(LogChannel::Build, "[Dep] Build '%s': executing build.", depName.c_str());
+							if (!SourceBuild::Build(depBuildParams)) {
+								Log::Error(LogChannel::Build, "[Dep] Build '%s': build failed.", depName.c_str());
+								return false;
+							}
+							Log::Info(LogChannel::Build, "[Dep] Build '%s': complete.", depName.c_str());
+							continue;
+						}
+					}
 				}
 				return true;
 			}
 		}
 		return false;
+	}
+	//
+	// Helper: recursively collect all dependencies of a build item (including transitive deps).
+	// Used for circular and diamond dependency detection.
+	// visited: set of already-visited build item names to detect cycles
+	// allDeps: output set collecting all dependencies found
+	// Returns false if a cycle is detected, true otherwise.
+	//
+	static bool CollectAllBuildDependencies(const std::string& buildName, std::unordered_set<std::string>& visited, std::unordered_set<std::string>& allDeps) {
+		//
+		// Cycle detection: if we're already visiting this node, we found a cycle
+		//
+		if (visited.find(buildName) != visited.end())
+			return false;
+		visited.insert(buildName);
+		//
+		// Get the build item's parameters to access its dependency list
+		//
+		SourceParams* params = nullptr;
+		if (!Project::BuildGetParams(buildName, &params) || params == nullptr) {
+			//
+			// Not a build item (might be a bitmap/tileset/etc.) -- not an error, just stop recursion
+			//
+			visited.erase(buildName);
+			return true;
+		}
+		//
+		// Iterate all dependencies and recurse
+		//
+		for (const auto& dep : params->dependencies) {
+			allDeps.insert(dep);
+			//
+			// Only recurse if dep is a Build item (bitmaps/tilesets/etc. have no sub-dependencies for this check)
+			//
+			SourceParams* depParams = nullptr;
+			if (Project::BuildGetParams(dep, &depParams) && depParams != nullptr) {
+				if (!CollectAllBuildDependencies(dep, visited, allDeps))
+					return false;
+			}
+		}
+		visited.erase(buildName);
+		return true;
+	}
+	//
+	// Check whether adding targetDep as a dependency to buildItemName would create a circular
+	// or diamond dependency.
+	// Returns true if the dependency is safe to add, false if it would create a cycle or diamond.
+	//
+	bool Project::BuildCanAddDependency(const std::string& buildItemName, const std::string& targetDep) {
+		if (!isProjectOpen)
+			return false;
+		//
+		// Case 1: Self-reference (A depends on A) -- reject immediately
+		//
+		if (buildItemName == targetDep)
+			return false;
+		//
+		// Case 2: Circular dependency check (A->B->C->A)
+		// If targetDep (directly or transitively) already depends on buildItemName, adding
+		// buildItemName->targetDep would create a cycle.
+		//
+		std::unordered_set<std::string> visited;
+		std::unordered_set<std::string> targetDeps;
+		if (!CollectAllBuildDependencies(targetDep, visited, targetDeps))
+			return false;
+		if (targetDeps.find(buildItemName) != targetDeps.end())
+			return false;
+		//
+		// Case 3: Diamond dependency check (A->B, A->C, B->D, C->D)
+		// If buildItemName already depends (directly or transitively) on targetDep, adding
+		// another path would create a diamond. We want to reject this to keep the dependency
+		// graph a tree (each item processed exactly once).
+		//
+		visited.clear();
+		std::unordered_set<std::string> buildDeps;
+		if (!CollectAllBuildDependencies(buildItemName, visited, buildDeps))
+			return false;
+		if (buildDeps.find(targetDep) != buildDeps.end())
+			return false;
+		//
+		// All checks passed -- safe to add
+		//
+		return true;
 	}
 	//
 	// Add an explicitly-created virtual folder to the Build section
@@ -1674,19 +1842,38 @@ namespace RetrodevLib {
 		return false;
 	}
 	//
-	// Get export parameters for a palette build item
+	// Rename all tracked file entries whose stored path starts with oldAbsPrefix.
+	// Converts both prefixes to relative form, then rewrites any matching entry.
 	//
-	bool Project::PaletteGetExportParams(const std::string& name, ExportParams** exportParams) {
+	int Project::RenameFilesWithPrefix(const std::string& oldAbsPrefix, const std::string& newAbsPrefix) {
 		if (!isProjectOpen)
-			return false;
-		for (auto& entry : currentProject.buildPalettes) {
-			if (entry.name == name) {
-				if (exportParams != nullptr)
-					*exportParams = &entry.exportParams;
-				return true;
+			return 0;
+		//
+		// Convert absolute prefix paths to the relative/stored form used in the project file.
+		// Append a forward-slash separator so only whole path segments match.
+		//
+		std::string oldRel = toRelativePath(oldAbsPrefix) + "/";
+		std::string newRel = toRelativePath(newAbsPrefix) + "/";
+		int count = 0;
+		auto rewrite = [&](std::string& storedPath) {
+			if (storedPath.rfind(oldRel, 0) == 0) {
+				storedPath = newRel + storedPath.substr(oldRel.size());
+				++count;
 			}
-		}
-		return false;
+		};
+		for (auto& e : currentProject.images)
+			rewrite(e.filePath);
+		for (auto& e : currentProject.audio)
+			rewrite(e.filePath);
+		for (auto& e : currentProject.sources)
+			rewrite(e.filePath);
+		for (auto& e : currentProject.scripts)
+			rewrite(e.filePath);
+		for (auto& e : currentProject.data)
+			rewrite(e.filePath);
+		if (count > 0)
+			isProjectModified = true;
+		return count;
 	}
 
 }

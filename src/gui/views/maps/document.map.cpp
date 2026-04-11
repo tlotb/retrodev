@@ -262,7 +262,13 @@ namespace RetrodevGui {
 		//
 		params->viewWidth = wp->viewWidth;
 		params->viewHeight = wp->viewHeight;
-		for (int li = 0; li < (int)m_absLayers.size() && li < (int)params->layers.size(); li++) {
+		params->tilesets = wp->tilesets;
+		//
+		// Sync layer structural fields (name, dimensions, speed, offset, visibility) back to lib params.
+		// Resize first so the per-field loop always covers the full abs layer count.
+		//
+		params->layers.resize(m_absLayers.size());
+		for (int li = 0; li < (int)m_absLayers.size(); li++) {
 			params->layers[li].name = m_absLayers[li].name;
 			params->layers[li].width = m_absLayers[li].width;
 			params->layers[li].height = m_absLayers[li].height;
@@ -270,21 +276,6 @@ namespace RetrodevGui {
 			params->layers[li].offsetX = m_absLayers[li].offsetX;
 			params->layers[li].offsetY = m_absLayers[li].offsetY;
 			params->layers[li].visible = m_absLayers[li].visible;
-		}
-		//
-		// Sync added/removed layers: adjust params->layers count to match abs
-		//
-		if (params->layers.size() != m_absLayers.size()) {
-			params->layers.resize(m_absLayers.size());
-			for (int li = 0; li < (int)m_absLayers.size(); li++) {
-				params->layers[li].name = m_absLayers[li].name;
-				params->layers[li].width = m_absLayers[li].width;
-				params->layers[li].height = m_absLayers[li].height;
-				params->layers[li].mapSpeed = m_absLayers[li].mapSpeed;
-				params->layers[li].offsetX = m_absLayers[li].offsetX;
-				params->layers[li].offsetY = m_absLayers[li].offsetY;
-				params->layers[li].visible = m_absLayers[li].visible;
-			}
 		}
 		//
 		// Sync group names/dimensions (not cell data) back to lib params
@@ -1038,6 +1029,10 @@ namespace RetrodevGui {
 			ImGui::SetTooltip("Tile palettes used by this map. Each slot holds one or more tileset variants\nthat can be swapped without changing tile indices in the map.\nThe active variant is used on the canvas and in export scripts.");
 		if (tilesetsOpen) {
 			//
+			// Build the list of project tilesets once; used by both the Add popup and the slot listbox
+			//
+			std::vector<std::string> projectTilesets = RetrodevLib::Project::GetBuildItemsByType(RetrodevLib::ProjectBuildType::Tilemap);
+			//
 			// Add Tileset button: creates a new slot with one initial variant
 			//
 			if (ImGui::Button(ICON_LAYERS_PLUS " Add Tileset...", ImVec2(-1.0f, 0.0f)))
@@ -1046,12 +1041,12 @@ namespace RetrodevGui {
 				ImGui::SetTooltip("Add a tileset build item as a new slot in this map.");
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
 			if (ImGui::BeginPopup("##AddTilesetPopup")) {
-				std::vector<std::string> allTilesets = RetrodevLib::Project::GetBuildItemsByType(RetrodevLib::ProjectBuildType::Tilemap);
-				if (allTilesets.empty()) {
-					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No tilesets in project.");
+				if (projectTilesets.empty()) {
+					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No tilesets defined in the project.");
+					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Add a Tilemap build item first.");
 				} else {
 					bool anyAvailable = false;
-					for (const auto& tsName : allTilesets) {
+					for (const auto& tsName : projectTilesets) {
 						//
 						// Skip tilesets already present in any slot's variant list
 						//
@@ -1081,7 +1076,7 @@ namespace RetrodevGui {
 						}
 					}
 					if (!anyAvailable)
-						ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "All tilesets already added.");
+						ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "All project tilesets are already in this map.");
 				}
 				ImGui::EndPopup();
 			}
@@ -1099,19 +1094,31 @@ namespace RetrodevGui {
 					// Build label: active variant name with variant count when there is more than one
 					//
 					std::string label;
+					bool isMissing = false;
 					if (slot.variants.empty()) {
 						label = "(empty slot)";
+						isMissing = true;
 					} else {
 						int vi = std::max(0, std::min(slot.activeVariant, (int)slot.variants.size() - 1));
-						label = slot.variants[vi];
-						if ((int)slot.variants.size() > 1) {
+						const std::string& activeName = slot.variants[vi];
+						//
+						// Mark as missing when the active variant is not found in the project's build items
+						//
+						isMissing = std::find(projectTilesets.begin(), projectTilesets.end(), activeName) == projectTilesets.end();
+						label = activeName;
+						if (isMissing)
+							label += "  [missing]";
+						if ((int)slot.variants.size() > 1)
 							label += "  (+" + std::to_string((int)slot.variants.size() - 1) + " variants)";
-						}
 					}
+					if (isMissing)
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.5f, 0.2f, 1.0f));
 					if (ImGui::Selectable(label.c_str(), selected)) {
 						m_selectedTilesetIdx = i;
 						m_selectedTileIdx = -1;
 					}
+					if (isMissing)
+						ImGui::PopStyleColor();
 				}
 				ImGui::EndListBox();
 			}
@@ -1218,7 +1225,16 @@ namespace RetrodevGui {
 			}
 			//
 			// Remove Slot button: removes the entire slot from the map
+			// Always accessible when a slot is selected, including stale (missing) slots
 			//
+			if (slotSelected) {
+				const auto& selSlot = params->tilesets[m_selectedTilesetIdx];
+				int selVi = std::max(0, std::min(selSlot.activeVariant, (int)selSlot.variants.size() - 1));
+				bool selIsMissing = selSlot.variants.empty() ||
+					std::find(projectTilesets.begin(), projectTilesets.end(), selSlot.variants[selVi]) == projectTilesets.end();
+				if (selIsMissing)
+					ImGui::TextColored(ImVec4(0.85f, 0.5f, 0.2f, 1.0f), ICON_ALERT_OUTLINE " This tileset no longer exists in the project.");
+			}
 			ImGui::BeginDisabled(!slotSelected);
 			if (ImGui::Button(ICON_DELETE " Remove##TilesetRemove", ImVec2(-1.0f, 0.0f)))
 				removeSlotIdx = m_selectedTilesetIdx;

@@ -291,7 +291,7 @@ namespace RetrodevLib {
 					// Parse key
 					//
 					const char* tok = v;
-					while (*v && *v != ' ' && *v != '\t')
+					while (*v && *v != ' ' && *v != '\t' && *v != '\n' && *v != '\r')
 						v++;
 					if (tok == v) {
 						Log::Warning(LogChannel::Script, "[Script] %s: @param tag has no key -- line ignored", scriptPath.c_str());
@@ -305,7 +305,7 @@ namespace RetrodevLib {
 					// Parse type
 					//
 					tok = v;
-					while (*v && *v != ' ' && *v != '\t')
+					while (*v && *v != ' ' && *v != '\t' && *v != '\n' && *v != '\r')
 						v++;
 					if (tok == v) {
 						Log::Warning(LogChannel::Script, "[Script] %s: @param '%s' has no type -- line ignored", scriptPath.c_str(), def.key.c_str());
@@ -322,7 +322,7 @@ namespace RetrodevLib {
 					// Parse default
 					//
 					tok = v;
-					while (*v && *v != ' ' && *v != '\t')
+					while (*v && *v != ' ' && *v != '\t' && *v != '\n' && *v != '\r')
 						v++;
 					if (tok == v) {
 						Log::Warning(LogChannel::Script, "[Script] %s: @param '%s' has no default value -- line ignored", scriptPath.c_str(), def.key.c_str());
@@ -337,7 +337,7 @@ namespace RetrodevLib {
 					//
 					if (def.type == "combo") {
 						tok = v;
-						while (*v && *v != ' ' && *v != '\t')
+						while (*v && *v != ' ' && *v != '\t' && *v != '\n' && *v != '\r')
 							v++;
 						if (tok == v) {
 							Log::Warning(LogChannel::Script, "[Script] %s: @param '%s' combo has no options list -- line ignored", scriptPath.c_str(), def.key.c_str());

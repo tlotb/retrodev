@@ -250,6 +250,7 @@ namespace ImGui {
 	}
 	void TextEditor::SetDocumentPath(const std::string& aValue) {
 		mDocumentPath = aValue;
+		mTotalCodeLensDirty = true;
 	}
 	const std::string& TextEditor::GetDocumentPath() const {
 		return mDocumentPath;
@@ -466,6 +467,7 @@ namespace ImGui {
 
 	void TextEditor::SetLanguageDefinition(LanguageDefinitionId aValue) {
 		mLanguageDefinitionId = aValue;
+		mTotalCodeLensDirty = true;
 		switch (mLanguageDefinitionId) {
 			case LanguageDefinitionId::None:
 				mLanguageDefinition = nullptr;
@@ -761,12 +763,12 @@ namespace ImGui {
 		mUndoBuffer.clear();
 		mUndoIndex = 0;
 		InvalidateLineMetadataCacheFromLine(0);
+		mTotalCodeLensDirty = true;
 
 		Colorize();
 	}
 
-	std::vector<std::string> TextEditor::GetTextLines() const {
-		std::vector<std::string> result;
+	std::vector<std::string> TextEditor::GetTextLines() const {		std::vector<std::string> result;
 
 		result.reserve(mLines.size());
 
@@ -1144,14 +1146,7 @@ namespace ImGui {
 	}
 
 	std::string TextEditor::GetWordAtScreenPos(const ImVec2& aScreenPos) const {
-		// Replicate the same origin and scroll arithmetic used by ScreenPosToCoordinates when
-		// called from inside the child window. mLastRenderOrigin is now captured from cursorScreenPos
-		// inside Render(bool), which is ImGui::GetCursorScreenPos() at that point -- scroll-adjusted.
-		ImVec2 local(aScreenPos.x - mLastRenderOrigin.x + 3.0f, aScreenPos.y - mLastRenderOrigin.y);
-		Coordinates coords;
-		coords.mLine = std::max(0, (int)floor(local.y / mCharAdvance.y));
-		coords.mColumn = std::max(0, (int)floor((local.x - mTextStart + POS_TO_COORDS_COLUMN_OFFSET * mCharAdvance.x) / mCharAdvance.x));
-		coords = SanitizeCoordinates(coords);
+		Coordinates coords = ScreenPosToCoordinates(aScreenPos);
 		auto start = FindWordStart(coords);
 		auto end = FindWordEnd(coords);
 		return GetText(start, end);
@@ -2018,67 +2013,29 @@ namespace ImGui {
 	}
 
 	TextEditor::Coordinates TextEditor::ScreenPosToCoordinates(const ImVec2& aPosition, bool* isOverLineNumber) const {
-		ImVec2 origin = ImGui::GetCursorScreenPos();
-		ImVec2 local(aPosition.x - origin.x + 3.0f, aPosition.y - origin.y);
+		// mLastRenderOrigin is the authoritative render-time origin (captured in Render(bool)).
+		// Using GetCursorScreenPos() here would give the wrong origin between frames.
+		ImVec2 local(aPosition.x - mLastRenderOrigin.x + 3.0f, aPosition.y - mLastRenderOrigin.y);
 
 		if (isOverLineNumber != nullptr)
 			*isOverLineNumber = local.x < mTextStart;
 
-		int line = std::max(0, (int)floor(local.y / mCharAdvance.y));
-		if (!mLines.empty()) {
-			const float codeLensLaneHeight = ImGui::GetFontSize() * 0.95f + 2.0f;
-			auto lineHasCodeLens = [&](int lineNo) -> bool {
-				if (sCodeLensFiles.empty() || lineNo < 0 || lineNo >= (int)mLines.size())
-					return false;
-				const auto& lineGlyphs = mLines[lineNo];
-				for (size_t fileIndex = 0; fileIndex < sCodeLensFiles.size(); fileIndex++) {
-					const auto& symbols = sCodeLensFiles[fileIndex].symbols;
-					for (size_t symbolIndex = 0; symbolIndex < symbols.size(); symbolIndex++) {
-						const CodeLensSymbolData& symbol = symbols[symbolIndex];
-						if (symbol.codelensText.empty() || symbol.symbolName.empty())
-							continue;
-						const std::string& word = symbol.symbolName;
-						const int lineSize = (int)lineGlyphs.size();
-						const int wordSize = (int)word.size();
-						for (int i = 0; i + wordSize <= lineSize; i++) {
-							bool matched = true;
-							for (int j = 0; j < wordSize; j++)
-								if ((char)std::toupper((unsigned char)lineGlyphs[i + j].mChar) != (char)std::toupper((unsigned char)word[j])) {
-									matched = false;
-									break;
-								}
-							if (!matched)
-								continue;
-							const bool leftBoundary = (i == 0) || !IsIdentifierWordByte(lineGlyphs[i - 1].mChar);
-							const bool rightBoundary = (i + wordSize >= lineSize) || !IsIdentifierWordByte(lineGlyphs[i + wordSize].mChar);
-							if (leftBoundary && rightBoundary) {
-								bool glyphInComment = false;
-								for (int ci = i; ci < i + wordSize && ci < lineSize; ci++)
-									if (lineGlyphs[ci].mComment || lineGlyphs[ci].mMultiLineComment) {
-										glyphInComment = true;
-										break;
-									}
-								if (glyphInComment)
-									continue;
-								return true;
-							}
-						}
-					}
-				}
-				return false;
-			};
-			float dynamicCodeLensYOffset = 0.0f;
-			for (int lineNo = mFirstVisibleLine; lineNo <= mLastVisibleLine && lineNo < (int)mLines.size(); lineNo++) {
-				bool hasCodeLens = lineHasCodeLens(lineNo);
-				float lineTopY = origin.y + lineNo * mCharAdvance.y + dynamicCodeLensYOffset;
-				float lineBottomY = lineTopY + mCharAdvance.y + (hasCodeLens ? codeLensLaneHeight : 0.0f);
-				if (aPosition.y >= lineTopY && aPosition.y < lineBottomY) {
-					line = lineNo;
-					break;
-				}
-				if (hasCodeLens)
-					dynamicCodeLensYOffset += codeLensLaneHeight;
-			}
+		// Convert the click Y (in document scroll-space: local.y + mScrollY) to a line number
+		// using mLineTopYCache, which is the same per-line Y table built by Render().
+		// This correctly accounts for codelens lane heights inserted above each line.
+		int line = mFirstVisibleLine;
+		float localScrollY = 0.0f;
+		if (!mLines.empty() && !mLineTopYCache.empty()) {
+			// localY is the position relative to the document top (scroll-space).
+			localScrollY = local.y + mScrollY;
+			// upper_bound gives the first entry strictly greater than localScrollY;
+			// stepping back one gives the last line whose top is at or before the click Y.
+			const int lineCount = (int)mLines.size();
+			auto it = std::upper_bound(mLineTopYCache.begin(), mLineTopYCache.begin() + lineCount, localScrollY);
+			if (it != mLineTopYCache.begin())
+				--it;
+			line = (int)(it - mLineTopYCache.begin());
+			line = std::max(0, std::min(line, lineCount - 1));
 		}
 		Coordinates out;
 		out.mLine = line;
@@ -2382,6 +2339,10 @@ namespace ImGui {
 	void TextEditor::HandleKeyboardInputs(bool aParentIsFocused) {
 		if (!ImGui::IsWindowFocused() && !aParentIsFocused)
 			return;
+		// Do not steal keyboard input when any popup (modal, context menu, input dialog) is open
+		// on top of this window. Those popups own keyboard focus and must receive input undisturbed.
+		if (GImGui->OpenPopupStack.Size > 0)
+			return;
 		if (ImGui::IsWindowHovered()) {
 			ImVec2 mousePos = ImGui::GetMousePos();
 			ImVec2 contentMin = ImGui::GetWindowPos();
@@ -2433,12 +2394,12 @@ namespace ImGui {
 		} else if (!alt && !ctrl && !super && (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))) {
 			int pageAmount = std::max(1, mVisibleLineCount - 2);
 			mAutocompleteEnabled = true;
-			ImGui::SetScrollY(std::max(0.0f, mScrollY - pageAmount * mCharAdvance.y));
+			ImGui::SetScrollY(mScrollY = std::max(0.0f, mScrollY - pageAmount * mCharAdvance.y));
 			MoveUp(pageAmount, shift);
 		} else if (!alt && !ctrl && !super && (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_Keypad3))) {
 			int pageAmount = std::max(1, mVisibleLineCount - 2);
 			mAutocompleteEnabled = true;
-			ImGui::SetScrollY(mScrollY + pageAmount * mCharAdvance.y);
+			ImGui::SetScrollY(mScrollY = mScrollY + pageAmount * mCharAdvance.y);
 			MoveDown(pageAmount, shift);
 		} else if (ctrl && !alt && !super && (ImGui::IsKeyPressed(ImGuiKey_Home) || ImGui::IsKeyPressed(ImGuiKey_Keypad7))) {
 			mAutocompleteEnabled = true;
@@ -2749,8 +2710,12 @@ namespace ImGui {
 		mContentWidth = ImGui::GetWindowWidth() - (IsVerticalScrollbarVisible() ? ImGui::GetStyle().ScrollbarSize : 0.0f);
 
 		mVisibleLineCount = std::max((int)ceil(mContentHeight / mCharAdvance.y), 0);
-		mFirstVisibleLine = std::max((int)(aScrollY / mCharAdvance.y), 0);
-		mLastVisibleLine = std::max((int)((mContentHeight + aScrollY) / mCharAdvance.y), 0);
+		const int lineCount = (int)mLines.size();
+		// Raw estimates (ignore codelens lane heights). The Render() path corrects these
+		// with a codelens-aware walk once currentFilePath and codeLensLaneHeight are known.
+		mFirstVisibleLine = std::min(std::max((int)(aScrollY / mCharAdvance.y), 0), std::max(lineCount - 1, 0));
+		mLastVisibleLine = std::min(std::max((int)((mContentHeight + aScrollY) / mCharAdvance.y), 0), std::max(lineCount - 1, 0));
+		mFirstVisibleLineYOffset = 0.0f;
 
 		mVisibleColumnCount = std::max((int)ceil((mContentWidth - std::max(mTextStart - aScrollX, 0.0f)) / mCharAdvance.x), 0);
 		mFirstVisibleColumn = std::max((int)(std::max(aScrollX - mTextStart, 0.0f) / mCharAdvance.x), 0);
@@ -2786,18 +2751,62 @@ namespace ImGui {
 		}
 
 		ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
-		mLastRenderOrigin = cursorScreenPos;
+		mLastRenderOrigin = ImGui::GetWindowPos();
 		mScrollX = ImGui::GetScrollX();
 		mScrollY = ImGui::GetScrollY();
 		UpdateViewVariables(mScrollX, mScrollY);
 
 		int maxColumnLimited = 0;
+		// Compute normalized file path once; used by total-height cache, EnsureCursorVisible, and the render loop.
+		const std::string currentFilePath = NormalizePath(mDocumentPath.empty() ? "<active-document>" : mDocumentPath);
+		// Rebuild the per-line Y cache when document content, codelens data, or font size changed.
+		// ComputeLineHasCodeLens is expensive (walks all symbol tables), so it runs here once on
+		// dirty rather than every frame in the visible-line walk.
+		const int lineCount = (int)mLines.size();
+		if (mTotalCodeLensDirty || mTotalCodeLensVersion != sCodeLensDataVersion
+			|| mLineTopYCacheVersion != sCodeLensDataVersion || mLineTopYCacheLineCount != lineCount
+			|| mLineTopYCacheCharAdvanceY != mCharAdvance.y) {
+			mTotalCodeLensHeight = 0.0f;
+			mLineTopYCache.resize((size_t)lineCount + 1);
+			mLineTopYCache[0] = 0.0f;
+			for (int ln = 0; ln < lineCount; ln++) {
+				float lineH = mCharAdvance.y;
+				if (ComputeLineHasCodeLens(ln, currentFilePath)) {
+					lineH += codeLensLaneHeight;
+					mTotalCodeLensHeight += codeLensLaneHeight;
+				}
+				mLineTopYCache[ln + 1] = mLineTopYCache[ln] + lineH;
+			}
+			mTotalCodeLensDirty = false;
+			mTotalCodeLensVersion = sCodeLensDataVersion;
+			mLineTopYCacheVersion = sCodeLensDataVersion;
+			mLineTopYCacheLineCount = lineCount;
+			mLineTopYCacheCharAdvanceY = mCharAdvance.y;
+		}
+		// Compute mFirstVisibleLine/mLastVisibleLine from the cache in O(log N) + O(viewport lines).
+		if (lineCount > 0 && !mLineTopYCache.empty()) {
+			// upper_bound returns iterator to first entry strictly greater than mScrollY;
+			// stepping back one gives the last line whose top is at or before the scroll position.
+			auto it = std::upper_bound(mLineTopYCache.begin(), mLineTopYCache.begin() + lineCount, mScrollY);
+			if (it != mLineTopYCache.begin())
+				--it;
+			mFirstVisibleLine = (int)(it - mLineTopYCache.begin());
+			mFirstVisibleLineYOffset = mLineTopYCache[mFirstVisibleLine] - mScrollY;
+			mLastVisibleLine = mFirstVisibleLine;
+			for (int ln = mFirstVisibleLine + 1; ln < lineCount; ln++) {
+				if (mLineTopYCache[ln] - mScrollY >= mContentHeight)
+					break;
+				mLastVisibleLine = ln;
+			}
+		}
+		const int visibleLineCount = mLastVisibleLine - mFirstVisibleLine + 1;
+		std::vector<float> visibleLineTextY(visibleLineCount > 0 ? visibleLineCount : 0, 0.0f);
+		std::vector<unsigned char> hasVisibleLineTextY(visibleLineCount > 0 ? visibleLineCount : 0, 0);
 		if (!mLines.empty()) {
 			auto drawList = ImGui::GetWindowDrawList();
 			float spaceSize = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, -1.0f, " ", nullptr, nullptr).x;
 			float codeLensStartX = cursorScreenPos.x + mTextStart + mCharAdvance.x * 0.5f;
 			std::unordered_map<int, std::string> errorTextByLine;
-			const std::string currentFilePath = NormalizePath(mDocumentPath.empty() ? "<active-document>" : mDocumentPath);
 			for (size_t fileIndex = 0; fileIndex < sCodeLensFiles.size(); fileIndex++) {
 				if (sCodeLensFiles[fileIndex].filePath != currentFilePath)
 					continue;
@@ -2814,10 +2823,11 @@ namespace ImGui {
 				}
 				break;
 			}
-			float dynamicCodeLensYOffset = 0.0f;
-			const int visibleLineCount = mLastVisibleLine - mFirstVisibleLine + 1;
-			std::vector<float> visibleLineTextY(visibleLineCount, 0.0f);
-			std::vector<unsigned char> hasVisibleLineTextY(visibleLineCount, 0);
+			// Initialize dynamicCodeLensYOffset: document-space Y of mFirstVisibleLine minus its
+			// raw line-index contribution, yielding the accumulated codelens lane height above it.
+			float dynamicCodeLensYOffset = !mLineTopYCache.empty()
+				? mLineTopYCache[mFirstVisibleLine] - mFirstVisibleLine * mCharAdvance.y
+				: 0.0f;
 			std::vector<std::pair<ImVec2, std::string>> pendingCodeLensTexts;
 			bool hasHoveredLineErrorTooltip = false;
 			const std::vector<CodeLensSymbolData>* currentFileSymbols = nullptr;
@@ -3055,6 +3065,8 @@ namespace ImGui {
 										hoveredWordUpper[c] = (char)std::toupper((unsigned char)hoveredWord[c]);
 								}
 								for (size_t fileIndex = 0; fileIndex < sCodeLensFiles.size(); fileIndex++) {
+									if (sCodeLensFiles[fileIndex].language != mLanguageDefinitionId)
+										continue;
 									const auto& symbols = sCodeLensFiles[fileIndex].symbols;
 									bool found = false;
 									for (size_t symbolIndex = 0; symbolIndex < symbols.size(); symbolIndex++) {
@@ -3113,6 +3125,8 @@ namespace ImGui {
 								const CodeLensSymbolData* hoveredSymbol = nullptr;
 									std::string hoveredSymbolFilePath;
 									for (size_t fileIndex = 0; fileIndex < sCodeLensFiles.size() && hoveredSymbol == nullptr; fileIndex++) {
+										if (sCodeLensFiles[fileIndex].language != mLanguageDefinitionId)
+											continue;
 										const auto& symbols = sCodeLensFiles[fileIndex].symbols;
 										for (size_t symbolIndex = 0; symbolIndex < symbols.size(); symbolIndex++) {
 											const CodeLensSymbolData& symbol = symbols[symbolIndex];
@@ -3207,35 +3221,55 @@ namespace ImGui {
 				}
 			}
 		}
-		mCurrentSpaceHeight = (mLines.size() + std::min(mVisibleLineCount - 1, (int)mLines.size())) * mCharAdvance.y;
+		// Total scrollable height includes codelens lane pixels so the scrollbar range is accurate.
+		mCurrentSpaceHeight = (mLines.size() + 1) * mCharAdvance.y + mTotalCodeLensHeight;
 		mCurrentSpaceWidth = (maxColumnLimited + std::min(mVisibleColumnCount - 1, maxColumnLimited)) * mCharAdvance.x;
 
 		ImGui::SetCursorPos(ImVec2(0, 0));
 		ImGui::Dummy(ImVec2(mCurrentSpaceWidth, mCurrentSpaceHeight));
 
 		if (mEnsureCursorVisible > -1) {
-			for (int i = 0; i < (mEnsureCursorVisibleStartToo ? 2 : 1); i++) // first pass for interactive end and second pass for interactive start
-			{
-				if (i)
-					UpdateViewVariables(mScrollX, mScrollY);									   // second pass depends on changes made in first pass
-				Coordinates targetCoords = GetSanitizedCursorCoordinates(mEnsureCursorVisible, i); // cursor selection end or start
-				if (targetCoords.mLine <= mFirstVisibleLine) {
-					float targetScroll = std::max(0.0f, (targetCoords.mLine - 0.5f) * mCharAdvance.y);
-					if (targetScroll < mScrollY)
-						ImGui::SetScrollY(targetScroll);
-				}
-				if (targetCoords.mLine >= mLastVisibleLine) {
-					float targetScroll = std::max(0.0f, (targetCoords.mLine + 1.5f) * mCharAdvance.y - mContentHeight);
-					if (targetScroll > mScrollY)
-						ImGui::SetScrollY(targetScroll);
-				}
-				if (targetCoords.mColumn <= mFirstVisibleColumn) {
+			// The child window is always created with ImGuiWindowFlags_HorizontalScrollbar,
+			// so the horizontal scrollbar space is ALWAYS reserved regardless of content width.
+			// effectiveH = windowH - sbSize always.
+			// The vertical scrollbar appears when content is taller than effectiveH.
+			const float sbSize = ImGui::GetStyle().ScrollbarSize;
+			const float windowH = ImGui::GetWindowHeight();
+			const float windowW = ImGui::GetWindowWidth();
+			const float effectiveH = windowH - sbSize;
+			const bool vscrollVisible = mCurrentSpaceHeight > effectiveH;
+			const float effectiveW = windowW - (vscrollVisible ? sbSize : 0.0f);
+			const float codeLensLaneH = ImGui::GetFontSize() * 0.95f + 2.0f;
+			for (int i = 0; i < (mEnsureCursorVisibleStartToo ? 2 : 1); i++) {
+				Coordinates targetCoords = GetSanitizedCursorCoordinates(mEnsureCursorVisible, i);
+				int cursorLine = targetCoords.mLine;
+				// Count codelens lane pixels above the cursor line so the scroll target
+				// places the cursor's actual rendered Y inside the viewport.
+				float codeLensAbove = 0.0f;
+				for (int ln = 0; ln < cursorLine; ln++)
+					if (ComputeLineHasCodeLens(ln, currentFilePath))
+						codeLensAbove += codeLensLaneH;
+				// cursorScrollBase: scroll-space Y of the top of the cursor line.
+				// Cursor occupies [cursorScrollBase, cursorScrollBase + mCharAdvance.y].
+				// Viewport occupies [mScrollY, mScrollY + effectiveH].
+				// Scroll up when cursor top is above viewport top.
+				// Scroll down when cursor bottom is below viewport bottom.
+				float cursorScrollBase = cursorLine * mCharAdvance.y + codeLensAbove;
+				if (cursorScrollBase < mScrollY)
+					ImGui::SetScrollY(mScrollY = std::max(0.0f, cursorScrollBase));
+				else if (cursorScrollBase + mCharAdvance.y > mScrollY + effectiveH)
+					ImGui::SetScrollY(mScrollY = std::max(0.0f, cursorScrollBase + mCharAdvance.y - effectiveH));
+				// Horizontal scroll: ensure cursor column is inside the visible column range.
+				// Recompute visible columns using the fresh effective width.
+				const float freshFirstVisibleColumn = std::max(0.0f, mScrollX - mTextStart) / mCharAdvance.x;
+				const float freshLastVisibleColumn = (effectiveW + mScrollX - mTextStart) / mCharAdvance.x;
+				if ((float)targetCoords.mColumn <= freshFirstVisibleColumn) {
 					float targetScroll = std::max(0.0f, mTextStart + (targetCoords.mColumn - 0.5f) * mCharAdvance.x);
 					if (targetScroll < mScrollX)
 						ImGui::SetScrollX(mScrollX = targetScroll);
 				}
-				if (targetCoords.mColumn >= mLastVisibleColumn) {
-					float targetScroll = std::max(0.0f, mTextStart + (targetCoords.mColumn + 0.5f) * mCharAdvance.x - mContentWidth);
+				if ((float)targetCoords.mColumn >= freshLastVisibleColumn) {
+					float targetScroll = std::max(0.0f, mTextStart + (targetCoords.mColumn + 0.5f) * mCharAdvance.x - effectiveW);
 					if (targetScroll > mScrollX)
 						ImGui::SetScrollX(mScrollX = targetScroll);
 				}
@@ -3373,6 +3407,7 @@ namespace ImGui {
 			return;
 		mCodeLensPendingRefresh = true;
 		mCodeLensLastEditTime = ImGui::GetTime();
+		mTotalCodeLensDirty = true;
 		// Cancel any in-progress or queued parse for this file; document state is now stale.
 		const std::string filePath = NormalizePath(mDocumentPath.empty() ? "<active-document>" : mDocumentPath);
 		if (sCodeLensActiveParseInProgress && sCodeLensActiveFilePath == filePath) {
@@ -3777,9 +3812,62 @@ namespace ImGui {
 	int TextEditor::sCodeLensActiveNextLine = 0;
 	bool TextEditor::sCodeLensActiveParseInProgress = false;
 	bool TextEditor::sCodeLensActiveSymbolsCleared = false;
+	int TextEditor::sCodeLensDataVersion = 0;
+
+	bool TextEditor::ComputeLineHasCodeLens(int aLine, const std::string& aCurrentFilePath) const {
+		if (sCodeLensFiles.empty() || aLine < 0 || aLine >= (int)mLines.size())
+			return false;
+		const auto& lineGlyphs = mLines[aLine];
+		// Check the repeat-block synthetic symbol first (file + line number key).
+		const std::string repeatKey = BuildRepeatCodeLensSymbolName(aCurrentFilePath, aLine);
+		for (size_t fi = 0; fi < sCodeLensFiles.size(); fi++) {
+			const auto& symbols = sCodeLensFiles[fi].symbols;
+			for (size_t si = 0; si < symbols.size(); si++) {
+				if (symbols[si].codelensText.empty())
+					continue;
+				if (symbols[si].symbolName == repeatKey)
+					return true;
+			}
+		}
+		// Check word-match symbols across all files.
+		const int lineSize = (int)lineGlyphs.size();
+		for (size_t fi = 0; fi < sCodeLensFiles.size(); fi++) {
+			const auto& symbols = sCodeLensFiles[fi].symbols;
+			for (size_t si = 0; si < symbols.size(); si++) {
+				const CodeLensSymbolData& sym = symbols[si];
+				if (sym.codelensText.empty() || sym.symbolName.empty())
+					continue;
+				const int wordSize = (int)sym.symbolName.size();
+				for (int ci = 0; ci + wordSize <= lineSize; ci++) {
+					bool matched = true;
+					for (int j = 0; j < wordSize; j++)
+						if ((char)std::toupper((unsigned char)lineGlyphs[ci + j].mChar) != (char)std::toupper((unsigned char)sym.symbolName[j])) {
+							matched = false;
+							break;
+						}
+					if (!matched)
+						continue;
+					const bool leftBoundary = (ci == 0) || !IsIdentifierWordByte(lineGlyphs[ci - 1].mChar);
+					const bool rightBoundary = (ci + wordSize >= lineSize) || !IsIdentifierWordByte(lineGlyphs[ci + wordSize].mChar);
+					if (!leftBoundary || !rightBoundary)
+						continue;
+					bool inComment = false;
+					for (int ki = ci; ki < ci + wordSize && ki < lineSize; ki++)
+						if (lineGlyphs[ki].mComment || lineGlyphs[ki].mMultiLineComment) {
+							inComment = true;
+							break;
+						}
+					if (!inComment)
+						return true;
+				}
+			}
+		}
+		return false;
+	}
 
 	void TextEditor::ClearCodeLensData() {
 		sCodeLensFiles.clear();
+		sCodeLensDataVersion++;
 	}
 
 	int TextEditor::AddCodeLensFile(const std::string& aFilePath) {
@@ -3861,6 +3949,8 @@ namespace ImGui {
 					removed++;
 				}
 		}
+		if (removed > 0)
+			sCodeLensDataVersion++;
 		return removed;
 	}
 
@@ -3895,6 +3985,7 @@ namespace ImGui {
 		}
 		if (languageDefinition->mCodeLensParseEnd != nullptr)
 			languageDefinition->mCodeLensParseEnd(aFilePath);
+		sCodeLensDataVersion++;
 		return true;
 	}
 
@@ -4012,6 +4103,7 @@ namespace ImGui {
 			sCodeLensActiveParseInProgress = false;
 			sCodeLensActiveSymbolsCleared = false;
 			sCodeLensActiveLines.clear();
+			sCodeLensDataVersion++;
 		}
 		return sCodeLensActiveParseInProgress || !sCodeLensParseQueue.empty();
 	}

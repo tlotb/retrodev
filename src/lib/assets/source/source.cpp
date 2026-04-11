@@ -20,10 +20,13 @@ namespace RetrodevLib {
 			Log::Error(LogChannel::Build, "[Build] No build parameters provided.");
 			return false;
 		}
-		if (params->sources.empty()) {
-			Log::Warning(LogChannel::Build, "[Build] No source files in the build item.");
-			return false;
-		}
+		//
+		// Build items with no source files are valid -- they may exist solely to orchestrate
+		// dependencies (e.g., a "meta-build" that triggers other build items in sequence).
+		// If there are no sources, return success immediately after dependencies have run.
+		//
+		if (params->sources.empty())
+			return true;
 		//
 		// Resolve project folder once -- all relative paths are anchored here
 		//

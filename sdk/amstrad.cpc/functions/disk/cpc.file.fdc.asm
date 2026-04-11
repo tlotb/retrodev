@@ -107,7 +107,7 @@ HDR_SIZE			equ 128
 ; ============================================================
 ; Static sector buffer (512 bytes -- must be in writable RAM)
 ; ============================================================
-FDC_SectorBuf	ds DISC_SECTOR_SIZE
+FDC_SectorBuf	ds FDC_DISC_SECTOR_SIZE
 
 ; ============================================================
 ; IY workspace layout (8 bytes allocated on the stack at entry)
@@ -130,11 +130,9 @@ FDC_SectorBuf	ds DISC_SECTOR_SIZE
 ;        Carry clear = failure; A = 0 (not found) or non-zero (FDC error)
 ; Destroys: AF, BC, DE, HL, IY  Preserves: IX
 CPC_FileLoadFDC:
-    ; Save drive in C before the FDC port probe destroys A.
+    ; Save drive then probe FDC: absent port returns #FF (floating bus).
     ld c,a
-    ; Probe FDC: absent port returns #FF (floating bus).
     ld b,FDC_PORT_STATUS_B
-    ld c,#7e
     in a,(c)
     cp #ff
     jp z,.ffd_no_disc
@@ -144,7 +142,7 @@ CPC_FileLoadFDC:
     ld iy,-8
     add iy,sp
     ld sp,iy
-    ld a,c
+    ld a,c				; drive (saved above)
     ld (iy+0),a			; drive
     ld (iy+1),1			; first-sector flag
     ld (iy+2),l			; filename ptr low
@@ -218,9 +216,8 @@ CPC_FileLoadFDC:
     pop bc
     pop de
     jp nc,.ffd_fail_fdc
-    ; After a successful match+load, HL = entry base (restored from push hl before compare).
-    ; Fall through to advance past this entry.
-    jr .ffd_entry_advance
+    ; File loaded successfully -- stop scanning and exit.
+    jp .ffd_success
 .ffd_cmp_fail:
     pop hl
     pop bc
@@ -233,11 +230,9 @@ CPC_FileLoadFDC:
     inc e
     dec d
     jp nz,.ffd_dir_sector
-    ; All directory sectors scanned.
-    ; bytes_loaded == 0 means the file was not found.
-    ld a,(iy+6)
-    or (iy+7)
-    jp z,.ffd_fail
+    ; All directory sectors scanned -- file not found.
+    jp .ffd_fail
+.ffd_success:
     ; Success.
     ld l,(iy+6)
     ld h,(iy+7)
@@ -404,8 +399,8 @@ CPC_FileLoadFDC:
     ld a,(iy+0)
     FDC_WriteByte a
     FDC_WriteByte b
-    ; Poll until FDC raises RQM after the seek completes.
-    ld b,FDC_PORT_STATUS_B
+    ; Poll FDC_MSR_RQM until seek completes (RQM rises after interrupt).
+    ld bc,FDC_PORT_STATUS
 .fdc_seek_poll:
     in a,(c)
     and FDC_MSR_RQM
@@ -452,23 +447,22 @@ CPC_FileLoadFDC:
     FDC_WriteByte FDC_DISC_GPL_RW	; GPL
     FDC_WriteByte FDC_DISC_DTL		; DTL
     pop bc				; discard saved track/sector
-    ; Data transfer phase: poll and read each byte into buffer.
+    ; Data transfer phase: poll RQM+DIO then read each byte into buffer.
     pop hl				; restore buffer pointer
     ld de,FDC_DISC_SECTOR_SIZE		; DE = bytes remaining
-    ld b,FDC_PORT_STATUS_B
 .fdc_data_poll:
+    ld bc,FDC_PORT_STATUS
     in a,(c)
     and FDC_MSR_RQM | FDC_MSR_DIO
     cp FDC_MSR_RQM | FDC_MSR_DIO
     jr nz,.fdc_data_poll
-    ld b,FDC_PORT_DATA_B
+    ld bc,FDC_PORT_DATA
     in a,(c)
     ld (hl),a
     inc hl
     dec de
     ld a,d
     or e
-    ld b,FDC_PORT_STATUS_B
     jr nz,.fdc_data_poll
     ; Result phase: ST0, ST1, ST2, C, H, R, N.
     FDC_ReadByte			; ST0

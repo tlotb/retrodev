@@ -557,6 +557,7 @@ namespace RetrodevGui {
 		SetModified(false);
 		std::error_code ec;
 		m_lastWriteTime = std::filesystem::last_write_time(m_filePath, ec);
+		m_justSaved = true;
 		return true;
 	}
 	//
@@ -573,34 +574,49 @@ namespace RetrodevGui {
 			std::filesystem::file_time_type diskTime = std::filesystem::last_write_time(m_filePath, ec);
 			if (!ec && diskTime != m_lastWriteTime) {
 				m_lastWriteTime = diskTime;
-				if (!IsModified()) {
-					//
-					// No unsaved changes -- reload silently
-					//
-					std::ifstream reloadFile(m_filePath);
-					if (reloadFile.good()) {
-						std::string content((std::istreambuf_iterator<char>(reloadFile)), std::istreambuf_iterator<char>());
-						m_editor.SetText(content);
-						m_originalText = content;
-						SetModified(false);
-					}
+				if (m_justSaved) {
+					// Delayed timestamp update from our own save -- absorb it, do not treat as external change
+					m_justSaved = false;
 				} else {
-					//
-					// Unsaved changes present -- ask the user
-					//
-					m_externalChangeDetected = true;
-					ImGui::OpenPopup("##ExternalChangeModal");
+					if (!IsModified()) {
+						//
+						// No unsaved changes -- reload silently
+						//
+						std::ifstream reloadFile(m_filePath);
+						if (reloadFile.good()) {
+							std::string content((std::istreambuf_iterator<char>(reloadFile)), std::istreambuf_iterator<char>());
+							m_editor.SetText(content);
+							m_originalText = content;
+							SetModified(false);
+						}
+					} else {
+						//
+						// Unsaved changes present -- ask the user
+						//
+						m_externalChangeDetected = true;
+						ImGui::OpenPopup("File Changed Externally##ExternalChangeModal");
+					}
 				}
 			}
 		}
 		//
 		// External change modal -- only shown when unsaved changes conflict with a disk change
 		//
+		ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
-		if (ImGui::BeginPopupModal("##ExternalChangeModal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::PopStyleVar();
-			ImGui::Text("File modified externally:");
-			ImGui::TextDisabled("%s", m_filePath.c_str());
+		if (ImGui::BeginPopupModal("File Changed Externally##ExternalChangeModal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), ICON_ALERT_CIRCLE);
+			ImGui::SameLine();
+			ImGui::Text("The file has been modified on disk:");
+			ImGui::Spacing();
+			//
+			// Show project-relative path when available, otherwise show filename only
+			//
+			const std::string displayPath = m_projectRelativePath.empty() ? std::filesystem::path(m_filePath).filename().string() : m_projectRelativePath;
+			ImGui::Indent(ImGui::GetFrameHeight());
+			ImGui::TextDisabled("%s", displayPath.c_str());
+			ImGui::Unindent(ImGui::GetFrameHeight());
 			ImGui::Spacing();
 			ImGui::Text("You have unsaved changes. Reload from disk?");
 			ImGui::Spacing();
@@ -621,9 +637,8 @@ namespace RetrodevGui {
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::EndPopup();
-		} else {
-			ImGui::PopStyleVar();
 		}
+		ImGui::PopStyleVar();
 		//
 		// Apply any pending scroll request targeting this document.
 		// Look up by project-relative path first (the canonical key); fall back to absolute path.

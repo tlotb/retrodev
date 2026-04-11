@@ -98,6 +98,11 @@ namespace RetrodevGui {
 		// Cleared once the user resolves the modal dialog.
 		//
 		bool m_externalChangeDetected = false;
+		//
+		// Set by SaveDocument() so the next Perform() frame skips the external-change check.
+		// Prevents the just-written file from triggering a spurious reload that resets the cursor.
+		//
+		bool m_justSaved = false;
 	};
 
 }

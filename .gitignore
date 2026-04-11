@@ -28,4 +28,7 @@ ext/ascript/
 ext/rasm/
 ext/ctre/
 
-
+#
+# Rasm symbol files
+#
+**/*.rasm

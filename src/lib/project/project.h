@@ -460,6 +460,13 @@ namespace RetrodevLib {
 		// Returns false if no project is open, the old name does not exist, or the new name already exists.
 		static bool BitmapRename(const std::string& oldName, const std::string& newName);
 		//
+		// Update the source file path for a bitmap build item.
+		// Returns false if no project is open or the bitmap name does not exist.
+		// name: bitmap build item name
+		// newSourceFilePath: new absolute path to the source image file
+		//
+		static bool BitmapSetSourcePath(const std::string& name, const std::string& newSourceFilePath);
+		//
 		// Get the source file path for a tileset build item.
 		// Returns empty string if not found or no project is open.
 		// name: tileset build item name
@@ -503,6 +510,13 @@ namespace RetrodevLib {
 		//
 		static bool TilesetRename(const std::string& oldName, const std::string& newName);
 		//
+		// Update the source file path for a tileset build item.
+		// Returns false if no project is open or the tileset name does not exist.
+		// name: tileset build item name
+		// newSourceFilePath: new absolute path to the source image file
+		//
+		static bool TilesetSetSourcePath(const std::string& name, const std::string& newSourceFilePath);
+		//
 		// Get the source file path for a sprite build item.
 		// Returns empty string if not found or no project is open.
 		// name: sprite build item name
@@ -533,6 +547,13 @@ namespace RetrodevLib {
 		// Returns false if no project is open, the old name does not exist, or the new name already exists.
 		//
 		static bool SpriteRename(const std::string& oldName, const std::string& newName);
+		//
+		// Update the source file path for a sprite build item.
+		// Returns false if no project is open or the sprite name does not exist.
+		// name: sprite build item name
+		// newSourceFilePath: new absolute path to the source image file
+		//
+		static bool SpriteSetSourcePath(const std::string& name, const std::string& newSourceFilePath);
 		//
 		// Get sprite extraction parameters for a sprite build item
 		// Returns the SpriteExtractionParams for the sprite
@@ -634,12 +655,20 @@ namespace RetrodevLib {
 		static bool BuildGetExportParams(const std::string& name, ExportParams** exportParams);
 		//
 		// Process all dependencies listed in the given build item's SourceParams in order.
-		// Each dependency is a build item name (bitmap, tileset, sprite, map, palette) that
-		// must be converted before the build executes.
+		// Each dependency is a build item name (bitmap, tileset, sprite, map, palette, or build) that
+		// must be converted/executed before the build executes.
 		// Returns true if all dependencies were dispatched successfully, false on the first failure.
 		// A failure aborts the remaining dependencies and stops the build.
 		//
 		static bool BuildProcessDependencies(const std::string& name);
+		//
+		// Check whether adding targetDep as a dependency to buildItemName would create a circular
+		// or diamond dependency. Returns true if the dependency is safe to add, false if it would
+		// create a cycle or diamond.
+		// buildItemName: the build item that will gain a new dependency
+		// targetDep: the candidate dependency name to add
+		//
+		static bool BuildCanAddDependency(const std::string& buildItemName, const std::string& targetDep);
 		//
 		// Virtual-folder management for the Build section.
 		// folderPath is a slash-separated virtual path (e.g. "graphics/cpc").
@@ -670,6 +699,13 @@ namespace RetrodevLib {
 		// Has no effect if no project is open.
 		//
 		static void SetSelectedBuildItem(const std::string& name);
+		//
+		// Rename all tracked file entries whose stored path starts with oldAbsPrefix
+		// to use newAbsPrefix instead. Both arguments are absolute filesystem paths.
+		// Used after a filesystem folder rename to keep the project in sync.
+		// Returns the number of entries updated.
+		//
+		static int RenameFilesWithPrefix(const std::string& oldAbsPrefix, const std::string& newAbsPrefix);
 	};
 
 }
