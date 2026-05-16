@@ -126,11 +126,16 @@ int build(string[] args) {
 			restoreVersionHeader(versionHeader, versionBackup);
 			return -1;
 		}
+		if (Kombine("src/retro.dev.raster.csx", "build", args,false) != 0) {
+			restoreVersionHeader(versionHeader, versionBackup);
+			return -1;
+		}
 		restoreVersionHeader(versionHeader, versionBackup);
 
 	} else {
 		Kombine("src/retro.dev.lib.csx", "build", args);
 		Kombine("src/retro.dev.gui.csx", "build", args);
+		Kombine("src/retro.dev.raster.csx", "build", args);
 	}
 	// Copy the sdk folder from the solution root to the binary output folder
 	// so the tool can find it when launched from the output directory during development.
@@ -165,6 +170,7 @@ int dependencies(string[] args) {
 	Kombine("ext/lib.ctre.csx", "dependencies", args);
 	Kombine("src/retro.dev.lib.csx", "dependencies", args);
 	Kombine("src/retro.dev.gui.csx", "dependencies", args);
+	Kombine("src/retro.dev.raster.csx", "dependencies", args);
 	return 0;
 }
 
@@ -193,6 +199,7 @@ int clean(string[] args){
 	Msg.Print("Cleaning application...");
 	Kombine("src/retro.dev.lib.csx", "clean", args);
 	Kombine("src/retro.dev.gui.csx", "clean", args);
+	Kombine("src/retro.dev.raster.csx", "clean", args);
 	Msg.EndIndent();
 	return 0;
 }

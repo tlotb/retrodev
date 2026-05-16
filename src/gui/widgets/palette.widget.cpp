@@ -9,7 +9,6 @@
 // --------------------------------------------------------------------------------------------------------------
 
 #include "palette.widget.h"
-#include <app/app.console.h>
 #include <app/app.icons.mdi.h>
 
 namespace RetrodevGui {
@@ -489,7 +488,6 @@ namespace RetrodevGui {
 				ImGui::SameLine();
 				if (ImGui::Button("Pick", ImVec2(buttonWidth, itemHeight))) {
 					m_pickingFromImage = true;
-					AppConsole::AddLog(AppConsole::LogLevel::Info, "Click on the source image to select transparent color");
 				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Pick color from source image");
@@ -668,7 +666,6 @@ namespace RetrodevGui {
 		// Done picking
 		//
 		m_pickingFromImage = false;
-		AppConsole::AddLogF(AppConsole::LogLevel::Info, "Transparent color set to R:%d G:%d B:%d", r, g, b);
 	}
 
 	//
