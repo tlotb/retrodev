@@ -2203,7 +2203,7 @@ namespace RetrodevLib {
 			return std::make_pair(frameSt, frameStart);
 		};
 
-		
+
 		//
 		// Process Effect and Variable commands from instance
 		// Each action is associated with the frame that contains its target scanline
@@ -2728,8 +2728,6 @@ namespace RetrodevLib {
 			AppendLine(out, "; CRTC raster timed layout: " + prefix);
 			AppendLine(out, "; Auto-generated -- do not edit manually.");
 			AppendLine(out, ";");
-			AppendLine(out, "; (c) TLOTB 2026");
-			AppendLine(out, ";");
 			AppendLine(out, "; ---------------------------------------------------------------------------");
 			AppendBlankLine(out);
 
@@ -2826,8 +2824,6 @@ namespace RetrodevLib {
 		AppendLine(out, ";");
 		AppendLine(out, "; CRTC raster interrupt layout: " + prefix);
 		AppendLine(out, "; Auto-generated -- do not edit manually.");
-		AppendLine(out, ";");
-		AppendLine(out, "; (c) TLOTB 2026");
 		AppendLine(out, ";");
 		AppendLine(out, "; ---------------------------------------------------------------------------");
 		AppendBlankLine(out);
