@@ -10,6 +10,7 @@
 
 #include "document.raster.h"
 #include "document.raster.cpc.h"
+#include <app/app.h>
 #include <app/app.console.h>
 #include <app/app.icons.mdi.h>
 #include <convert/converters.h>
@@ -101,6 +102,9 @@ namespace RetrodevGui {
 			static DocumentRasterCpc cpcPanel;
 			m_cpcPanel = &cpcPanel;  // Track pointer for Save()
 			cpcPanel.SetParent(this);  // Notify parent on modifications
+			cpcPanel.SetOnModified([]() { RetrodevLib::Project::MarkAsModified(); });
+			cpcPanel.SetProjectFolder(RetrodevLib::Project::GetProjectFolder());
+			cpcPanel.SetRenderer(Application::GetRenderer());
 			cpcPanel.RenderPanel(params);
 			return;
 		}

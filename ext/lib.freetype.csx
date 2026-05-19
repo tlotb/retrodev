@@ -34,6 +34,11 @@ int dependencies(string[] args){
 		Folders.Delete(libpath,true);
 		return 0;
 	}
+	if (Host.IsLinux() && HasSystemFreetype() &&
+		(Args.Get(0) == "install" || Args.Get(0) == "update")) {
+		Msg.Print($"System FreeType detected. Skipping {libfriendlyname} source dependency action.");
+		return 0;
+	}
 	if (Args.Get(0) == "update") {
 		if (Folders.Exists(libpath)){
 			Msg.Print($"Updating {libname} sources");
@@ -61,6 +66,11 @@ int dependencies(string[] args){
 int build(string[] args){
 	Msg.Print($"Building {libfriendlyname} library");
 	Msg.BeginIndent();
+	if (Host.IsLinux() && HasSystemFreetype()) {
+		Msg.Print("Linux host detected. Using system FreeType package instead of source build.");
+		Msg.EndIndent();
+		return register(args);
+	}
 	// Check if the sdl2 sources folder is present
 	if (!Folders.Exists(libpath)){
 		Msg.PrintAndAbort($"{libfriendlyname} sources not found. Please run 'mkb dependencies install' to get the sources.");
@@ -74,6 +84,10 @@ int build(string[] args){
 	Flags += "-Wno-deprecated-declarations";
 	// The list of defines to use
 	KList Defines = new KList { "FT2_BUILD_LIBRARY" };
+	if (Host.IsLinux()) {
+		Defines += "HAVE_UNISTD_H";
+		Defines += "HAVE_FCNTL_H";
+	}
 	// Include directories
 	KList Includes = new KList();
 	Includes += libpath+"include/";
@@ -112,6 +126,36 @@ int build(string[] args){
 int register(string[] args) {
 	Msg.Print($"Registering {libfriendlyname} library");
 	Msg.BeginIndent();
+	if (Host.IsLinux() && HasSystemFreetype()) {
+		string incpath = "/usr/include/freetype2/";
+		string libpath = "/usr/lib/x86_64-linux-gnu/";
+		if (System.IO.File.Exists(incpath + "ft2build.h") == false) {
+			if (System.IO.File.Exists("/usr/include/freetype2/ft2build.h")) {
+				incpath = "/usr/include/freetype2/";
+			} else {
+				Msg.PrintAndAbort("FreeType headers not found. Install package: libfreetype-dev");
+			}
+		}
+		if (System.IO.File.Exists(libpath + "libfreetype.so") == false) {
+			if (System.IO.File.Exists("/usr/lib/libfreetype.so")) {
+				libpath = "/usr/lib/";
+			} else {
+				Msg.PrintAndAbort("FreeType shared library not found. Install package: libfreetype-dev");
+			}
+		}
+		Msg.Print($"Registering {libfriendlyname} library under the name: " + libname);
+		Msg.Print("  libname: freetype");
+		Share.Register(libname, "libname", "freetype");
+		Msg.Print("  libpath: " + libpath);
+		Share.Register(libname, "libpath", libpath);
+		Msg.Print("  incpath: " + incpath);
+		Share.Register(libname, "incpath", incpath);
+		Msg.PrintTask("Registered system library: " + libname);
+		Msg.PrintTaskSuccess(" done");
+		Msg.Print("---------------------------------------------------------------------------------------");
+		Msg.EndIndent();
+		return 0;
+	}
 	KValue OutputLib = KValue.Import("OutputLib");
 	OutputLib += libname + "/";
 	// Create an instance of the clang tool.
@@ -129,6 +173,13 @@ int register(string[] args) {
 	Msg.Print("---------------------------------------------------------------------------------------");
 	Msg.EndIndent();
 	return 0;
+}
+
+private bool HasSystemFreetype() {
+	string incpath = "/usr/include/freetype2/";
+	string libpath = "/usr/lib/x86_64-linux-gnu/";
+	return System.IO.File.Exists(incpath + "ft2build.h") &&
+		(System.IO.File.Exists(libpath + "libfreetype.so") || System.IO.File.Exists("/usr/lib/libfreetype.so"));
 }
 //
 // Clean artifacts
@@ -211,8 +262,8 @@ private KList CreateSourceList(KValue libpath){
 		// Not yet.
 	}
 	if (Host.IsLinux()){
-		// Not yet.
-
+		src += libpath + "src/base/ftdebug.c";
+		src += libpath + "builds/unix/ftsystem.c";
 	}
 	return src;
 }

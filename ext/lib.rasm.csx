@@ -71,25 +71,33 @@ int build(string[] args){
 	KValue OutputTmp = KValue.Import("OutputTmp");
 	// Compilation flags
 	KList Flags = new KList {
-		"--target=x86_64-pc-windows-msvc",
-		"-fms-extensions",
-		"-fms-compatibility",
-		"-fms-compatibility-version=19",
-		"-include intrin.h",
 		"-Wno-deprecated-declarations",
 		"-Wno-pointer-sign",
 		"-Wno-constant-conversion",
 		"-Wno-sizeof-pointer-memaccess",
 		"-Wno-dangling-else"
 	};
-	
+	if (Host.IsWindows()) {
+		Flags += "--target=x86_64-pc-windows-msvc";
+		Flags += "-fms-extensions";
+		Flags += "-fms-compatibility";
+		Flags += "-fms-compatibility-version=19";
+		Flags += "-include intrin.h";
+	}
+
 	// The list of defines to use
-	KList Defines = new KList { 
-		"INTEGRATED_ASSEMBLY", 
-		"NOAPULTRA=1",
-		"DOS_WIN=1"
+	KList Defines = new KList {
+		"INTEGRATED_ASSEMBLY",
+		"NOAPULTRA=1"
 	};
-	
+	if (Host.IsWindows()) {
+		Defines += "DOS_WIN=1";
+	}
+	if (Host.IsLinux()) {
+		Defines += "_GNU_SOURCE";
+		Defines += "_DEFAULT_SOURCE";
+	}
+
 	// Include directories
 	KList Includes = new KList();
 	// We will wrap rasm inside our own .c file to tweak it.

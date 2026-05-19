@@ -832,8 +832,7 @@ namespace RetrodevGui {
 		//
 		static char buildNameBuf[256] = "";
 		if (buildNameBuf[0] == '\0' || m_name != std::string(buildNameBuf)) {
-			strncpy_s(buildNameBuf, m_name.c_str(), sizeof(buildNameBuf) - 1);
-			buildNameBuf[sizeof(buildNameBuf) - 1] = '\0';
+			std::snprintf(buildNameBuf, sizeof(buildNameBuf), "%s", m_name.c_str());
 		}
 		ImGui::AlignTextToFramePadding();
 		ImGui::Text("Build Item Name:");
@@ -848,8 +847,7 @@ namespace RetrodevGui {
 					RetrodevLib::Project::MarkAsModified();
 				} else {
 					AppConsole::AddLogF(AppConsole::LogLevel::Error, "Failed to rename build item '%s' to '%s' (name may already exist)", m_name.c_str(), newName.c_str());
-					strncpy_s(buildNameBuf, m_name.c_str(), sizeof(buildNameBuf) - 1);
-					buildNameBuf[sizeof(buildNameBuf) - 1] = '\0';
+					std::snprintf(buildNameBuf, sizeof(buildNameBuf), "%s", m_name.c_str());
 				}
 			}
 		}

@@ -16,6 +16,7 @@
 #include <generators/raster/amstrad.cpc/cpc.raster.h>
 #include <widgets/palette.widget.h>
 #include <SDL3/SDL.h>
+#include <functional>
 
 namespace RetrodevGui {
 	//
@@ -31,9 +32,25 @@ namespace RetrodevGui {
 				SDL_DestroyTexture(m_monitorTex);
 		}
 		//
+		// Reset panel UI/cache state so a new raster file can be loaded cleanly.
+		//
+		void Reset();
+		//
 		// Set the parent document for modification notifications
 		//
 		void SetParent(class DocumentRaster* parent);
+		//
+		// Optional callback invoked whenever the panel data is modified.
+		//
+		void SetOnModified(std::function<void()> onModified);
+		//
+		// Set base folder used to resolve relative output paths on ASM export.
+		//
+		void SetProjectFolder(const std::string& projectFolder);
+		//
+		// Set SDL renderer used by monitor-mode texture creation.
+		//
+		void SetRenderer(SDL_Renderer* renderer);
 		//
 		// Initialize the panel with raster parameters (called once when document loads).
 		// Transfers ownership of the raster state to the library instance.
@@ -179,6 +196,10 @@ namespace RetrodevGui {
 		// Mark params as dirty and start debounce timer (called on any param change)
 		void MarkDirty();
 		//
+		// Notify host that the document state changed (used for Save enablement and dirty flags).
+		//
+		void NotifyHostModified();
+		//
 		// Check debounce timer and regenerate if interval expired (called every frame)
 		void UpdateAutoGenerate(double deltaTime);
 		//
@@ -188,6 +209,12 @@ namespace RetrodevGui {
 
 		// Project folder path to resolve relative output paths
 		std::string m_projectFolder = {};
+
+		// Optional host callback invoked on any user-visible modification.
+		std::function<void()> m_onModified;
+
+		// Optional renderer override used by standalone hosts.
+		SDL_Renderer* m_renderer = nullptr;
 
 		// CPC CRTC library instance: one per raster document
 		// Handles all serialization/deserialization and code generation

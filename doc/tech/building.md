@@ -11,7 +11,25 @@ Retrodev uses **[Kombine](https://github.com/kollective-networks/kltv.kombine)**
 | [Git](https://git-scm.com/) | Required to fetch and update external dependencies. Must be on `PATH`. |
 | Visual Studio or Microsoft Build Tools | Clang on Windows links against the MSVC CRT and Windows SDK. These are not bundled with Clang — they must be installed separately. See [Windows CRT requirements](#windows-crt-requirements) below. |
 
-Retrodev currently builds on **Windows only**. Kombine itself runs on Windows, macOS and Linux, and both the build scripts and the application code are structured to support other platforms — but the port is not yet complete.
+Retrodev currently builds on **Windows and Linux**. macOS support is still in progress.
+
+## Linux requirements
+
+On Linux, Retrodev links SDL3, SDL3_image, and FreeType from system packages instead of building them from source.
+
+```sh
+sudo apt update
+sudo apt install -y clang lld git libsdl3-dev libsdl3-image-dev libfreetype-dev
+```
+
+After dependencies are installed, the standard Kombine flow is the same as on Windows:
+
+```sh
+mkb dependencies install
+mkb build debug deps
+```
+
+The Linux GUI binary is produced at `out/bin/lnx/debug/retro.dev.gui/retro.dev.gui.out`.
 
 ## Windows CRT requirements
 

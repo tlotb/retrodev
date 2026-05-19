@@ -1,0 +1,163 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "mkb: dependencies install",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "dependencies",
+        "install"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: dependencies update",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "dependencies",
+        "update"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: dependencies clean",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "dependencies",
+        "clean"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: build debug",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "build",
+        "debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: build debug deps",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "build",
+        "debug",
+        "deps"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: build release",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "build",
+        "release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "mkb: clean debug",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "clean",
+        "debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: clean release",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "clean",
+        "release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: clean debug deps",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "clean",
+        "debug",
+        "deps"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: format",
+      "type": "shell",
+      "command": "mkb",
+      "args": [
+        "-kfile:kombine.csx",
+        "format"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "mkb: bootstrap (deps install + build debug deps)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "mkb: dependencies install",
+        "mkb: build debug deps"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

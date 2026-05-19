@@ -17,6 +17,7 @@
 #include <views/main.view.project.h>
 #include <views/main.view.documents.h>
 #include <assets/palette/palette.h>
+#include <cstring>
 
 namespace RetrodevGui {
 	//
@@ -620,7 +621,7 @@ namespace RetrodevGui {
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(fontSize * 14.0f);
 		char nameBuf[128];
-		strncpy_s(nameBuf, zone.name.c_str(), sizeof(nameBuf) - 1);
+		std::strncpy(nameBuf, zone.name.c_str(), sizeof(nameBuf) - 1);
 		nameBuf[sizeof(nameBuf) - 1] = '\0';
 		if (ImGui::InputText("##ZoneName", nameBuf, sizeof(nameBuf))) {
 			zone.name = nameBuf;
@@ -946,7 +947,7 @@ namespace RetrodevGui {
 					float arrowW = ImGui::GetFrameHeight();
 					ImGui::SetNextItemWidth(fontSize * 10.0f - arrowW - ImGui::GetStyle().ItemSpacing.x);
 					char tagBuf[128];
-					strncpy_s(tagBuf, p.tag.c_str(), sizeof(tagBuf) - 1);
+					std::strncpy(tagBuf, p.tag.c_str(), sizeof(tagBuf) - 1);
 					tagBuf[sizeof(tagBuf) - 1] = '\0';
 					if (ImGui::InputText("##PartTag", tagBuf, sizeof(tagBuf))) {
 						p.tag = tagBuf;
@@ -1731,7 +1732,7 @@ namespace RetrodevGui {
 		//
 		static char paletteNameBuf[256] = "";
 		if (paletteNameBuf[0] == '\0' || m_name != std::string(paletteNameBuf)) {
-			strncpy_s(paletteNameBuf, m_name.c_str(), sizeof(paletteNameBuf) - 1);
+			std::strncpy(paletteNameBuf, m_name.c_str(), sizeof(paletteNameBuf) - 1);
 			paletteNameBuf[sizeof(paletteNameBuf) - 1] = '\0';
 		}
 		ImGui::AlignTextToFramePadding();
@@ -1747,7 +1748,7 @@ namespace RetrodevGui {
 					RetrodevLib::Project::MarkAsModified();
 				} else {
 					AppConsole::AddLogF(AppConsole::LogLevel::Error, "Failed to rename palette '%s' to '%s' (name may already exist)", m_name.c_str(), newName.c_str());
-					strncpy_s(paletteNameBuf, m_name.c_str(), sizeof(paletteNameBuf) - 1);
+					std::strncpy(paletteNameBuf, m_name.c_str(), sizeof(paletteNameBuf) - 1);
 					paletteNameBuf[sizeof(paletteNameBuf) - 1] = '\0';
 				}
 			}

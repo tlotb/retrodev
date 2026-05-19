@@ -55,7 +55,9 @@ On Windows release builds the GUI script additionally adds the `.rc` resource fi
 
 `src/gui/os/win/entry.cpp` provides the Windows entry point. In release mode it defines `WinMain`, converts the LPSTR command line to a UTF-8 `argv` array via `WideCharToMultiByte`, and calls the shared `retromain()`. In debug mode the same file defines a standard `main()` so the application runs as a console program.
 
-An equivalent entry point file does not yet exist for Linux (`src/gui/os/lnx/`) or macOS (`src/gui/os/osx/`). Because both of those platforms use a standard `main()` signature, each file would be trivial — a single `main(int argc, char** argv)` forwarding to `retromain()`.
+Linux now has an explicit entry point at `src/gui/os/lnx/entry.cpp`. It defines `main(int argc, char** argv)` and forwards directly to `retromain()`.
+
+macOS still needs an equivalent `src/gui/os/osx/entry.cpp` file.
 
 ### Emulator process launching
 
@@ -83,7 +85,7 @@ setupapi.lib  imm32.lib  shell32.lib  ole32.lib  advapi32.lib
 version.lib  oleaut32.lib  Shcore.lib  uxtheme.lib  Ws2_32.lib
 ```
 
-The equivalent system library list for Linux and macOS is currently a `// TODO` block in the script and must be filled in when those ports are completed.
+Linux now links `m`, `dl`, `pthread`, and `rt` in `retro.dev.gui.csx`. macOS still has a `// TODO` linker block.
 
 ## Summary: what remains for a Linux or macOS port
 
@@ -93,5 +95,5 @@ The equivalent system library list for Linux and macOS is currently a `// TODO` 
 | Third-party libraries (SDL3, ImGui, FreeType, etc.) | ✅ All support Linux and macOS |
 | Kombine platform filtering infrastructure | ✅ Already handles Linux and macOS folder exclusion |
 | Emulator spawn (`posix_spawn`) | ✅ `lnx` and `osx` files already exist |
-| Application entry point (`main()`) | ❌ `src/gui/os/lnx/` and `src/gui/os/osx/` files not yet created |
-| System linker libraries | ❌ TODO blocks in `retro.dev.gui.csx` need filling |
+| Application entry point (`main()`) | ⚠️ Linux done (`src/gui/os/lnx/entry.cpp`), macOS pending (`src/gui/os/osx/entry.cpp`) |
+| System linker libraries | ⚠️ Linux done (`m`, `dl`, `pthread`, `rt`), macOS pending |

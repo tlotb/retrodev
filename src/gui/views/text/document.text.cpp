@@ -18,6 +18,7 @@
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
+#include <cstring>
 
 namespace RetrodevGui {
 	//

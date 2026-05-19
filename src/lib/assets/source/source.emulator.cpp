@@ -82,6 +82,7 @@ namespace RetrodevLib {
 			std::string lineBuf;
 		};
 		static std::vector<LiveProcess> s_liveProcesses;
+		static bool SpawnNative(const std::string& exePath, const std::string& rawCmdLine, const std::string& workDir);
 		//
 		// Spawn a process with the given executable, argument string and working directory.
 		// exePath is always argv[0]; args is a pre-built shell-style argument string that
@@ -90,6 +91,20 @@ namespace RetrodevLib {
 		// to s_liveProcesses so Poll() can detect when it exits.
 		//
 		static bool Spawn(const std::string& exePath, const std::string& args, const std::string& workDir, const std::string& rawCmdLine = "") {
+		#if !defined(_WIN32)
+			std::string absWorkDir = workDir.empty() ? std::filesystem::path(exePath).parent_path().string() : workDir;
+			std::string nativeCmdLine;
+			if (!rawCmdLine.empty()) {
+				nativeCmdLine = rawCmdLine;
+			} else {
+				nativeCmdLine = "\"" + exePath + "\"";
+				if (!args.empty()) {
+					nativeCmdLine += " ";
+					nativeCmdLine += args;
+				}
+			}
+			return SpawnNative(exePath, nativeCmdLine, absWorkDir);
+		#else
 			//
 			// Split args into tokens respecting double-quoted spans.
 			// Each token becomes one element of the argv array passed to SDL.
@@ -189,6 +204,7 @@ namespace RetrodevLib {
 			//
 			s_liveProcesses.push_back({proc, nullptr, ""});
 			return true;
+		#endif
 		}
 		//
 		// Launch a GUI process via SourceEmulatorNative with no stdio redirection.

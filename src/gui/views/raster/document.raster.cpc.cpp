@@ -11,16 +11,15 @@
 #include "document.raster.h"
 #include "document.raster.cpc.h"
 #include <app/app.h>
-#include <app/app.console.h>
 #include <app/app.icons.mdi.h>
-#include <views/main.view.project.h>
-#include <views/text/document.text.h>
+#include <views/text/langs/lang.asm.z80.h>
 #include <convert/amstrad.cpc/amstrad.cpc.h>
 #include <filesystem>
 #include <fstream>
 #include <array>
 #include <algorithm>
 #include <map>
+#include <utility>
 #include <SDL3/SDL.h>
 
 namespace RetrodevGui {
@@ -81,6 +80,57 @@ namespace RetrodevGui {
 			// No previous enabled effect found; treat as absolute 0
 			return effect.targetScanline;
 		}
+	}
+
+	static const ImGui::ILanguageDefinition* GetRasterAsmLanguage() {
+		static Z80AsmLanguage s_z80AsmLanguage;
+		return &s_z80AsmLanguage;
+	}
+
+	void DocumentRasterCpc::Reset() {
+		if (m_monitorTex) {
+			SDL_DestroyTexture(m_monitorTex);
+			m_monitorTex = nullptr;
+		}
+		m_monitorTexW = 0;
+		m_monitorTexH = 0;
+		m_monitorPhaseLines = 0;
+		m_selectedCommandIndex = -1;
+		m_generatedAsm.clear();
+		m_validationResult.entries.clear();
+		m_timingReport.slots.clear();
+		m_dirty = false;
+		m_debounceTime = 0.0;
+		m_sizesInitialized = false;
+		m_generatorFieldsInit = false;
+		m_generatorStatusVisible = false;
+		m_generatorStatusBuf[0] = '\0';
+		m_generatorWarnings.clear();
+		m_frameSmcCheckboxStates.clear();
+		m_framePatchFunctionCheckboxStates.clear();
+		m_frameSmcLabelBuffers.clear();
+		m_vmaEnableStates.clear();
+		m_vmaSmcCheckboxStates.clear();
+		m_vmaSmcLabelBuffers.clear();
+		m_effectModeStates.clear();
+		m_effectOffsetStates.clear();
+		m_effectSmcCheckboxStates.clear();
+		m_effectSmcLabelBuffers.clear();
+		m_varUnrestrainedStates.clear();
+		m_cpcCrtc = RetrodevLib::CPCRaster();
+		m_initialized = false;
+	}
+
+	void DocumentRasterCpc::SetOnModified(std::function<void()> onModified) {
+		m_onModified = std::move(onModified);
+	}
+
+	void DocumentRasterCpc::SetProjectFolder(const std::string& projectFolder) {
+		m_projectFolder = projectFolder;
+	}
+
+	void DocumentRasterCpc::SetRenderer(SDL_Renderer* renderer) {
+		m_renderer = renderer;
 	}
 
 	void DocumentRasterCpc::SyncUIStateFromCommands() {
@@ -149,7 +199,6 @@ namespace RetrodevGui {
 		// Initialize on first use (library owns state from here on)
 		Initialize(params);
 
-		m_projectFolder = RetrodevLib::Project::GetProjectFolder();
 		float fontSize = ImGui::GetFontSize();
 		ImVec2 avail = ImGui::GetContentRegionAvail();
 		//
@@ -251,7 +300,6 @@ namespace RetrodevGui {
 	// ---------------------------------------------------------------------------
 
 	void DocumentRasterCpc::RenderVisualizer() {
-		//
 		// Use the deserialized commands from the library instance
 		//
 		const auto& cmds = m_cpcCrtc.GetCommands();
@@ -380,7 +428,7 @@ namespace RetrodevGui {
 				m_monitorTexH = 0;
 			}
 			if (!m_monitorTex && imgW > 0 && imgH > 0) {
-				SDL_Renderer* rend = Application::GetRenderer();
+				SDL_Renderer* rend = (m_renderer != nullptr) ? m_renderer : Application::GetRenderer();
 				m_monitorTex = SDL_CreateTexture(rend, SDL_PIXELFORMAT_RGBA32,
 					SDL_TEXTUREACCESS_STREAMING, imgW, imgH);
 				if (m_monitorTex) {
@@ -909,7 +957,7 @@ namespace RetrodevGui {
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 		if (ImGui::InputText("##ruptureName", m_ruptureNameBuf, sizeof(m_ruptureNameBuf))) {
 			m_cpcCrtc.GetCpcConfig().ruptureName = m_ruptureNameBuf;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 		ImGui::AlignTextToFramePadding();
@@ -918,7 +966,7 @@ namespace RetrodevGui {
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 		if (ImGui::InputText("##outputAsmPath", m_outputPathBuf, sizeof(m_outputPathBuf))) {
 			m_cpcCrtc.GetCpcConfig().outputAsmPath = m_outputPathBuf;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 		ImGui::AlignTextToFramePadding();
@@ -928,7 +976,7 @@ namespace RetrodevGui {
 		int mode = m_cpcCrtc.GetCpcConfig().generatorMode;
 		if (ImGui::Combo("##generatorMode", &mode, "Interrupt-driven\0Timed raster loop\0\0")) {
 			m_cpcCrtc.GetCpcConfig().generatorMode = (uint8_t)mode;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 
@@ -957,7 +1005,7 @@ namespace RetrodevGui {
 				params->targetMode,
 				params->targetPaletteType
 			);
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 
@@ -972,7 +1020,7 @@ namespace RetrodevGui {
 			if (initC0 < 0) initC0 = 0;
 			if (initC0 > 127) initC0 = 127;
 			m_cpcCrtc.GetCpcConfig().initC0 = (uint8_t)initC0;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 
@@ -985,7 +1033,7 @@ namespace RetrodevGui {
 			if (initC4 < 0) initC4 = 0;
 			if (initC4 > 127) initC4 = 127;
 			m_cpcCrtc.GetCpcConfig().initC4 = (uint8_t)initC4;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 
@@ -998,7 +1046,7 @@ namespace RetrodevGui {
 			if (initC9 < 0) initC9 = 0;
 			if (initC9 > 15) initC9 = 15;
 			m_cpcCrtc.GetCpcConfig().initC9 = (uint8_t)initC9;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 
@@ -1036,7 +1084,7 @@ namespace RetrodevGui {
 					RetrodevLib::CpcRasterCommand newCmd = frameCmd;
 					m_cpcCrtc.GetCommands().push_back(newCmd);
 					m_selectedCommandIndex = (int)m_cpcCrtc.GetCommands().size() - 1;
-					RetrodevLib::Project::MarkAsModified();
+					NotifyHostModified();
 					MarkDirty();
 				}
 				ImGui::SameLine();
@@ -1050,7 +1098,7 @@ namespace RetrodevGui {
 					RetrodevLib::CpcRasterCommand newCmd = effectCmd;
 					m_cpcCrtc.GetCommands().push_back(newCmd);
 					m_selectedCommandIndex = (int)m_cpcCrtc.GetCommands().size() - 1;
-					RetrodevLib::Project::MarkAsModified();
+					NotifyHostModified();
 					MarkDirty();
 				}
 				ImGui::SameLine();
@@ -1068,7 +1116,7 @@ namespace RetrodevGui {
 					RetrodevLib::CpcRasterCommand newCmd = varCmd;
 					m_cpcCrtc.GetCommands().push_back(newCmd);
 					m_selectedCommandIndex = (int)m_cpcCrtc.GetCommands().size() - 1;
-					RetrodevLib::Project::MarkAsModified();
+					NotifyHostModified();
 					MarkDirty();
 				}
 				ImGui::SameLine();
@@ -1086,7 +1134,7 @@ namespace RetrodevGui {
 					RetrodevLib::CpcRasterCommand newCmd = subCmd;
 					m_cpcCrtc.GetCommands().push_back(newCmd);
 					m_selectedCommandIndex = (int)m_cpcCrtc.GetCommands().size() - 1;
-					RetrodevLib::Project::MarkAsModified();
+					NotifyHostModified();
 					MarkDirty();
 				}
 				ImGui::SameLine();
@@ -1100,7 +1148,7 @@ namespace RetrodevGui {
 			m_cpcCrtc.GetCommands().erase(m_cpcCrtc.GetCommands().begin() + m_selectedCommandIndex);
 			if (m_selectedCommandIndex >= (int)m_cpcCrtc.GetCommands().size())
 				m_selectedCommandIndex = (int)m_cpcCrtc.GetCommands().size() - 1;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 		if (!hasSelection)
@@ -1115,7 +1163,7 @@ namespace RetrodevGui {
 		if (ImGui::Button(ICON_ARROW_UP)) {
 			std::swap(m_cpcCrtc.GetCommands()[m_selectedCommandIndex], m_cpcCrtc.GetCommands()[m_selectedCommandIndex - 1]);
 			m_selectedCommandIndex--;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 		if (atTop)
@@ -1130,7 +1178,7 @@ namespace RetrodevGui {
 		if (ImGui::Button(ICON_ARROW_DOWN)) {
 			std::swap(m_cpcCrtc.GetCommands()[m_selectedCommandIndex], m_cpcCrtc.GetCommands()[m_selectedCommandIndex + 1]);
 			m_selectedCommandIndex++;
-			RetrodevLib::Project::MarkAsModified();
+			NotifyHostModified();
 			MarkDirty();
 		}
 		if (atBottom)
@@ -1143,7 +1191,9 @@ namespace RetrodevGui {
 			m_cpcCrtc.GetCpcConfig().ruptureName = m_ruptureNameBuf;
 			m_cpcCrtc.GetCpcConfig().outputAsmPath = m_outputPathBuf;
 			if (m_cpcCrtc.GetCpcConfig().outputAsmPath.empty()) {
-				AppConsole::AddLogF(AppConsole::Channel::Build, AppConsole::LogLevel::Warning, "No ASM output path set for CPC raster export.");
+				SDL_snprintf(m_generatorStatusBuf, sizeof(m_generatorStatusBuf), "%s", "No ASM output path set for export.");
+				m_generatorStatusColor = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
+				m_generatorStatusVisible = true;
 			} else {
 				// Use the cached generated code if available; otherwise regenerate
 				std::string code = m_generatedAsm;
@@ -1151,7 +1201,9 @@ namespace RetrodevGui {
 					code = m_cpcCrtc.GenerateCode(&m_timingReport);
 				}
 				if (code.empty()) {
-					AppConsole::AddLogF(AppConsole::Channel::Build, AppConsole::LogLevel::Warning, "CPC raster export skipped because code generation returned no output.");
+					SDL_snprintf(m_generatorStatusBuf, sizeof(m_generatorStatusBuf), "%s", "Export skipped: generated code is empty.");
+					m_generatorStatusColor = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
+					m_generatorStatusVisible = true;
 				} else {
 					std::filesystem::path outPath = m_cpcCrtc.GetCpcConfig().outputAsmPath;
 
@@ -1165,16 +1217,19 @@ namespace RetrodevGui {
 						std::filesystem::create_directories(outPath.parent_path(), ec);
 					std::ofstream file(outPath, std::ios::binary | std::ios::trunc);
 					if (!file.good()) {
-						AppConsole::AddLogF(AppConsole::Channel::Build, AppConsole::LogLevel::Error, "Export failed: could not open file");
-						AppConsole::SetActiveChannel(AppConsole::Channel::Build);
+						SDL_snprintf(m_generatorStatusBuf, sizeof(m_generatorStatusBuf), "%s", "Export failed: could not open output file.");
+						m_generatorStatusColor = ImVec4(1.0f, 0.35f, 0.35f, 1.0f);
+						m_generatorStatusVisible = true;
 					} else {
 						file.write(code.data(), (std::streamsize)code.size());
 						if (!file.good()) {
-							AppConsole::AddLogF(AppConsole::Channel::Build, AppConsole::LogLevel::Error, "Export failed: write error");
-							AppConsole::SetActiveChannel(AppConsole::Channel::Build);
+							SDL_snprintf(m_generatorStatusBuf, sizeof(m_generatorStatusBuf), "%s", "Export failed: write error.");
+							m_generatorStatusColor = ImVec4(1.0f, 0.35f, 0.35f, 1.0f);
+							m_generatorStatusVisible = true;
 						} else {
-							AppConsole::AddLogF(AppConsole::Channel::Build, AppConsole::LogLevel::Info, "Exported CPC raster code to: %s", outPath.string().c_str());
-							AppConsole::SetActiveChannel(AppConsole::Channel::Build);
+							SDL_snprintf(m_generatorStatusBuf, sizeof(m_generatorStatusBuf), "Exported ASM to: %s", outPath.string().c_str());
+							m_generatorStatusColor = ImVec4(0.2f, 0.9f, 0.2f, 1.0f);
+							m_generatorStatusVisible = true;
 						}
 					}
 				}
@@ -1234,7 +1289,7 @@ namespace RetrodevGui {
 						std::get<RetrodevLib::CpcSubroutineCommand>(cmd).enabled = enabled;
 						m_cpcCrtc.GetCommands()[i] = cmd;
 					}
-					RetrodevLib::Project::MarkAsModified();
+					NotifyHostModified();
 					MarkDirty();
 				}
 				ImGui::SameLine();
@@ -1327,7 +1382,7 @@ namespace RetrodevGui {
 							ImGui::SameLine(280.0f);  // Fixed position for slider - ensures all sliders align vertically
 
 							int v = reg;
-							ImGui::SetNextItemWidth(120.0f);  // Fixed slider width
+							ImGui::SetNextItemWidth(255.0f);  // Fixed slider width for precise frame register adjustment
 							char id[40];
 							SDL_snprintf(id, sizeof(id), "##%s", label);
 							ImGui::AlignTextToFramePadding();
@@ -1904,7 +1959,7 @@ namespace RetrodevGui {
 					//
 					if (changed || labelChanged) {
 						m_cpcCrtc.GetCommands()[m_selectedCommandIndex] = cmd;
-						RetrodevLib::Project::MarkAsModified();
+						NotifyHostModified();
 						if (changed)  // Only trigger code generation if parameters changed, not just labels
 							MarkDirty();
 					}
@@ -1918,7 +1973,7 @@ namespace RetrodevGui {
 				// Initialize editor on first use
 				static bool sourceEditorInit = false;
 				if (!sourceEditorInit) {
-					m_sourceEditor.SetLanguageDefinition(RetrodevGui::GetZ80AsmLanguage());
+					m_sourceEditor.SetLanguageDefinition(GetRasterAsmLanguage());
 					m_sourceEditor.SetReadOnlyEnabled(true);
 					sourceEditorInit = true;
 				}
@@ -1995,12 +2050,16 @@ namespace RetrodevGui {
 		m_parent = parent;
 	}
 
+	void DocumentRasterCpc::NotifyHostModified() {
+		if (m_parent)
+			m_parent->SetModified(true);
+		if (m_onModified)
+			m_onModified();
+	}
+
 	void DocumentRasterCpc::MarkDirty() {
 		m_dirty = true;
 		m_debounceTime = 0.0;  // reset debounce timer
-		if (m_parent) {
-			m_parent->SetModified(true);
-		}
 	}
 
 	void DocumentRasterCpc::UpdateAutoGenerate(double deltaTime) {

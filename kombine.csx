@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------------------------------------
 
-	Retro Dev 
+	Retro Dev
 
 	Main build script
 
@@ -20,17 +20,11 @@ using static Kltv.Kombine.Api.Statics;
 using static Kltv.Kombine.Api.Tool;
 
 
-// Build right now is limited to Windows
-//
-if (Host.IsWindows() == false) {
-	Msg.PrintAndAbort("RetroDev can be built only on Windows right now.");
-}
-
 // Initialize the build flags
 BuildFlags.Init();
 
 
-// Show the help 
+// Show the help
 //
 //---------------------------------------------------
 int help(string[] args){
@@ -127,8 +121,12 @@ int build(string[] args) {
 		if (Kombine("src/retro.dev.lib.csx", "build", args,false) != 0) {
 			restoreVersionHeader(versionHeader, versionBackup);
 			return -1;
-		}	
+		}
 		if (Kombine("src/retro.dev.gui.csx", "build", args,false) != 0) {
+			restoreVersionHeader(versionHeader, versionBackup);
+			return -1;
+		}
+		if (Kombine("src/retro.dev.raster.csx", "build", args,false) != 0) {
 			restoreVersionHeader(versionHeader, versionBackup);
 			return -1;
 		}
@@ -137,6 +135,7 @@ int build(string[] args) {
 	} else {
 		Kombine("src/retro.dev.lib.csx", "build", args);
 		Kombine("src/retro.dev.gui.csx", "build", args);
+		Kombine("src/retro.dev.raster.csx", "build", args);
 	}
 	// Copy the sdk folder from the solution root to the binary output folder
 	// so the tool can find it when launched from the output directory during development.
@@ -171,6 +170,7 @@ int dependencies(string[] args) {
 	Kombine("ext/lib.ctre.csx", "dependencies", args);
 	Kombine("src/retro.dev.lib.csx", "dependencies", args);
 	Kombine("src/retro.dev.gui.csx", "dependencies", args);
+	Kombine("src/retro.dev.raster.csx", "dependencies", args);
 	return 0;
 }
 
@@ -199,6 +199,7 @@ int clean(string[] args){
 	Msg.Print("Cleaning application...");
 	Kombine("src/retro.dev.lib.csx", "clean", args);
 	Kombine("src/retro.dev.gui.csx", "clean", args);
+	Kombine("src/retro.dev.raster.csx", "clean", args);
 	Msg.EndIndent();
 	return 0;
 }
@@ -299,7 +300,7 @@ void buildOutputPaths() {
 		OutputBin += "/release/";
 		OutputLib += "/release/";
 		OutputTmp += "/release/";
-	} 
+	}
 	else if (BuildFlags.Flags.BuildMode == "debug") {
 		OutputBin += "/debug/";
 		OutputLib += "/debug/";
@@ -324,21 +325,21 @@ void buildCompilerFlags(Clang clang) {
 		clang.Options.Verbose = true;
 	}
 	// Language version & disable built in char8_t for utf8 (so u8 casts to const char* like C++11)
-	clang.Options.SwitchesCC = new KList() { 
-		"-std=c17" , 
+	clang.Options.SwitchesCC = new KList() {
+		"-std=c17" ,
 		"-fno-char8_t"};
-	clang.Options.SwitchesCXX = new KList() { 
-		"-std=c++20", 
-		"-fno-char8_t", 
-		"-pedantic", 
-		"-Wall", 
-		"-Wextra", 
-		"-Wno-unused", 
-		"-Wno-c++26-extensions", 
+	clang.Options.SwitchesCXX = new KList() {
+		"-std=c++20",
+		"-fno-char8_t",
+		"-pedantic",
+		"-Wall",
+		"-Wextra",
+		"-Wno-unused",
+		"-Wno-c++26-extensions",
 		"-fno-exceptions"};
 	if (Host.IsWindows()){
 		clang.Options.Defines = new KList() {
-			"WINDOWS", 
+			"WINDOWS",
 			"_WIN64",
 			"_WIN32",
 			"_CRT_SECURE_NO_WARNINGS" };
@@ -350,10 +351,10 @@ void buildCompilerFlags(Clang clang) {
 			clang.Options.Defines += "NDEBUG";
 			clang.Options.Defines += "RELEASE";
 		} else if (BuildFlags.Flags.BuildMode == "debug") {
-			KList options = new KList() { 
-				"-g", 
-				"-glldb", 
-				"-gfull", 
+			KList options = new KList() {
+				"-g",
+				"-glldb",
+				"-gfull",
 				"-O0" };
 			clang.Options.SwitchesCC += options;
 			clang.Options.SwitchesCXX += options;
@@ -361,15 +362,38 @@ void buildCompilerFlags(Clang clang) {
 			clang.Options.SwitchesCXX += "-fms-runtime-lib=static_dbg";
 			clang.Options.Defines += "DEBUG";
 			clang.Options.Defines += "NRELEASE";
-			clang.Options.SwitchesLD = new KList() { 
-				"-g", 
-				"-glldb", 
+			clang.Options.SwitchesLD = new KList() {
+				"-g",
+				"-glldb",
 				"-gfull" };
 		} else {
 			Msg.PrintAndAbort("Invalid Build Configuration:" + BuildFlags.Flags.BuildMode);
 		}
 	}
 	if (Host.IsLinux()){
+		clang.Options.Defines = new KList() {
+			"LINUX"
+		};
+		if (BuildFlags.Flags.BuildMode == "release") {
+			clang.Options.SwitchesCC += "-O2";
+			clang.Options.SwitchesCXX += "-O2";
+			clang.Options.Defines += "NDEBUG";
+			clang.Options.Defines += "RELEASE";
+		} else if (BuildFlags.Flags.BuildMode == "debug") {
+			KList options = new KList() {
+				"-g",
+				"-O0"
+			};
+			clang.Options.SwitchesCC += options;
+			clang.Options.SwitchesCXX += options;
+			clang.Options.Defines += "DEBUG";
+			clang.Options.Defines += "NRELEASE";
+			clang.Options.SwitchesLD = new KList() {
+				"-g"
+			};
+		} else {
+			Msg.PrintAndAbort("Invalid Build Configuration:" + BuildFlags.Flags.BuildMode);
+		}
 	}
 	if (Host.IsMacOS()){
 	}

@@ -88,6 +88,11 @@ int dependencies(string[] args){
 int build(string[] args){
 	Msg.Print($"Building {sdl3friendlyname} Image library");
 	Msg.BeginIndent();
+	if (Host.IsLinux()) {
+		Msg.Print("Linux host detected. Using system SDL3_image package instead of source build.");
+		Msg.EndIndent();
+		return register(args);
+	}
 	// Check if the sdl3 sources folder is present
 	if (!Folders.Exists(sdl3path)){
 		Msg.PrintAndAbort($"{sdl3friendlyname} image sources not found. Please run 'mkb dependencies install' to get the sources.");
@@ -134,6 +139,32 @@ int build(string[] args){
 int register(string[] args) {
 	Msg.Print($"Registering {sdl3friendlyname} library");
 	Msg.BeginIndent();
+	if (Host.IsLinux()) {
+		string incpath = "/usr/include/";
+		string libpath = "/usr/lib/x86_64-linux-gnu/";
+		if (System.IO.File.Exists(incpath + "SDL3_image/SDL_image.h") == false) {
+			Msg.PrintAndAbort("SDL3_image headers not found. Install package: libsdl3-image-dev");
+		}
+		if (System.IO.File.Exists(libpath + "libSDL3_image.so") == false) {
+			if (System.IO.File.Exists("/usr/lib/libSDL3_image.so")) {
+				libpath = "/usr/lib/";
+			} else {
+				Msg.PrintAndAbort("SDL3_image shared library not found. Install package: libsdl3-image-dev");
+			}
+		}
+		Msg.Print($"Registering {sdl3friendlyname} library under the name: " + sdl3name);
+		Msg.Print("  libname: SDL3_image");
+		Share.Register(sdl3name, "libname", "SDL3_image");
+		Msg.Print("  libpath: " + libpath);
+		Share.Register(sdl3name, "libpath", libpath);
+		Msg.Print("  incpath: " + incpath);
+		Share.Register(sdl3name, "incpath", incpath);
+		Msg.EndIndent();
+		Msg.PrintTask("Registered system library: " + sdl3name);
+		Msg.PrintTaskSuccess(" done");
+		Msg.Print("---------------------------------------------------------------------------------------");
+		return 0;
+	}
 	KValue OutputLib = KValue.Import("OutputLib");
 	OutputLib += sdl3name + "/";
 	// Create an instance of the clang tool.

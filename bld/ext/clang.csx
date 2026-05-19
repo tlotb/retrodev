@@ -424,12 +424,44 @@ public class Clang {
 				Msg.PrintAndAbort("Error: empty library found.");
 			}
 			Msg.Print(v);
-			if (System.IO.Path.IsPathRooted(v.ToString())) {
+			string libName = v.ToString();
+			bool hasExtension =
+				libName.EndsWith(".a") ||
+				libName.EndsWith(".so") ||
+				libName.EndsWith(".dylib") ||
+				libName.EndsWith(".lib");
+			if (System.IO.Path.IsPathRooted(libName)) {
 				// Full path to library
 				libs += v + " ";
+			} else if (hasExtension) {
+				// Full library file name (with extension): resolve against library dirs.
+				bool found = false;
+				foreach (KValue libdir in Options.LibraryDirs) {
+					string fullLibPath = (libdir + libName).ToString();
+					if (System.IO.File.Exists(fullLibPath)) {
+						libs += fullLibPath + " ";
+						found = true;
+						break;
+					}
+				}
+				if (!found && (Host.IsLinux() || Host.IsMacOS()) && !libName.StartsWith("lib")) {
+					// Static libraries on Unix are commonly emitted as lib<name>.a.
+					foreach (KValue libdir in Options.LibraryDirs) {
+						string fullLibPath = (libdir + "lib" + libName).ToString();
+						if (System.IO.File.Exists(fullLibPath)) {
+							libs += fullLibPath + " ";
+							found = true;
+							break;
+						}
+					}
+				}
+				if (!found) {
+					// Keep as-is so the linker reports the unresolved file explicitly.
+					libs += libName + " ";
+				}
 			} else {
 				// Just library name
-				libs += "-l" + v + " ";
+				libs += "-l" + libName + " ";
 			}
 		}
 		Msg.EndIndent();

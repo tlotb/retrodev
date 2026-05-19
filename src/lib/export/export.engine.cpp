@@ -20,6 +20,7 @@
 #include <log/log.h>
 #include <filesystem>
 #include <cstdio>
+#include <cstring>
 
 namespace RetrodevLib {
 	namespace ExportImpl {

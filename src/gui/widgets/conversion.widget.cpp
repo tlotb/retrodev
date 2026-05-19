@@ -12,6 +12,7 @@
 #include <app/app.console.h>
 #include <app/app.icons.mdi.h>
 #include <convert/converters.h>
+#include <cstring>
 
 namespace RetrodevGui {
 
@@ -127,7 +128,7 @@ namespace RetrodevGui {
 		// Initialize buffer with current name if empty or different
 		//
 		if (nameBuffer[0] == '\0' || buildItemName != std::string(nameBuffer)) {
-			strncpy_s(nameBuffer, buildItemName.c_str(), sizeof(nameBuffer) - 1);
+			std::strncpy(nameBuffer, buildItemName.c_str(), sizeof(nameBuffer) - 1);
 			nameBuffer[sizeof(nameBuffer) - 1] = '\0';
 		}
 		ImGui::AlignTextToFramePadding();
@@ -148,7 +149,7 @@ namespace RetrodevGui {
 					//
 					// Revert buffer to original name
 					//
-					strncpy_s(nameBuffer, buildItemName.c_str(), sizeof(nameBuffer) - 1);
+					std::strncpy(nameBuffer, buildItemName.c_str(), sizeof(nameBuffer) - 1);
 					nameBuffer[sizeof(nameBuffer) - 1] = '\0';
 				}
 			}

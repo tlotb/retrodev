@@ -16,6 +16,7 @@
 #include <convert/converters.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace RetrodevGui {
 	//
@@ -572,7 +573,7 @@ namespace RetrodevGui {
 				m_selectedTileIdx = -1;
 				m_groupCapturing = false;
 				m_groupCaptureDragging = false;
-				strncpy_s(m_groupRenameBuffer, params->groups[m_selectedGroupIdx].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
+				std::strncpy(m_groupRenameBuffer, params->groups[m_selectedGroupIdx].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
 				m_groupRenameBuffer[sizeof(m_groupRenameBuffer) - 1] = '\0';
 				m_groupRenameIdx = m_selectedGroupIdx;
 				SetModified(true);
@@ -798,7 +799,7 @@ namespace RetrodevGui {
 		// Map name: editable field; pressing Enter renames the build item
 		//
 		if (m_name != std::string(m_nameBuffer)) {
-			strncpy_s(m_nameBuffer, m_name.c_str(), sizeof(m_nameBuffer) - 1);
+			std::strncpy(m_nameBuffer, m_name.c_str(), sizeof(m_nameBuffer) - 1);
 			m_nameBuffer[sizeof(m_nameBuffer) - 1] = '\0';
 		}
 		ImGui::AlignTextToFramePadding();
@@ -815,7 +816,7 @@ namespace RetrodevGui {
 					RetrodevLib::Project::MarkAsModified();
 				} else {
 					AppConsole::AddLogF(AppConsole::LogLevel::Error, "Failed to rename map '%s' to '%s' (name may already exist)", m_name.c_str(), newName.c_str());
-					strncpy_s(m_nameBuffer, m_name.c_str(), sizeof(m_nameBuffer) - 1);
+					std::strncpy(m_nameBuffer, m_name.c_str(), sizeof(m_nameBuffer) - 1);
 					m_nameBuffer[sizeof(m_nameBuffer) - 1] = '\0';
 				}
 			}
@@ -1753,7 +1754,7 @@ namespace RetrodevGui {
 			// Sync rename buffer when the selected layer changes
 			//
 			if (m_layerRenameIdx != m_editingLayerIdx) {
-				strncpy_s(m_layerRenameBuffer, editLayer.name.c_str(), sizeof(m_layerRenameBuffer) - 1);
+				std::strncpy(m_layerRenameBuffer, editLayer.name.c_str(), sizeof(m_layerRenameBuffer) - 1);
 				m_layerRenameBuffer[sizeof(m_layerRenameBuffer) - 1] = '\0';
 				m_layerRenameIdx = m_editingLayerIdx;
 			}
@@ -1852,7 +1853,7 @@ namespace RetrodevGui {
 					//
 					// Sync rename buffer to the newly selected group
 					//
-					strncpy_s(m_groupRenameBuffer, params->groups[i].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
+					std::strncpy(m_groupRenameBuffer, params->groups[i].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
 					m_groupRenameBuffer[sizeof(m_groupRenameBuffer) - 1] = '\0';
 					m_groupRenameIdx = i;
 				}
@@ -1868,7 +1869,7 @@ namespace RetrodevGui {
 			// Sync buffer if the selection changed since last frame
 			//
 			if (m_groupRenameIdx != m_selectedGroupIdx) {
-				strncpy_s(m_groupRenameBuffer, params->groups[m_selectedGroupIdx].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
+				std::strncpy(m_groupRenameBuffer, params->groups[m_selectedGroupIdx].name.c_str(), sizeof(m_groupRenameBuffer) - 1);
 				m_groupRenameBuffer[sizeof(m_groupRenameBuffer) - 1] = '\0';
 				m_groupRenameIdx = m_selectedGroupIdx;
 			}

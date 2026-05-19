@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "RetroDev GUI (Debug)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/out/bin/lnx/debug/retro.dev.gui/retro.dev.gui.out",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/out/bin/lnx/debug/retro.dev.gui",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable gdb pretty printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "mkb: build debug"
+    },
+    {
+      "name": "RetroDev Raster (Debug)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/out/bin/lnx/debug/retro.dev.raster/retro.dev.raster.out",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/out/bin/lnx/debug/retro.dev.raster",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable gdb pretty printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "mkb: build debug"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "RetroDev GUI + Raster (Debug)",
+      "configurations": [
+        "RetroDev GUI (Debug)",
+        "RetroDev Raster (Debug)"
+      ]
+    }
+  ]
+}

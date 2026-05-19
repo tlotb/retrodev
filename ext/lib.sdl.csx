@@ -64,6 +64,11 @@ int dependencies(string[] args){
 int build(string[] args){
 	Msg.Print($"Building {sdlfriendlyname} library");
 	Msg.BeginIndent();
+	if (Host.IsLinux()) {
+		Msg.Print("Linux host detected. Using system SDL3 package instead of source build.");
+		Msg.EndIndent();
+		return register(args);
+	}
 	// Check if the sdl3 sources folder is present
 	if (!Folders.Exists(sdl3path)){
 		Msg.PrintAndAbort($"{sdlfriendlyname} sources not found. Please run 'mkb dependencies install' to get the sources.");
@@ -73,8 +78,8 @@ int build(string[] args){
 	KValue OutputLib = KValue.Import("OutputLib");
 	KValue OutputTmp = KValue.Import("OutputTmp");
 	// Compilation flags
-	KList Flags = new KList { 
-		"-msse3", 
+	KList Flags = new KList {
+		"-msse3",
 		"-Wno-empty-body",
 		"-Wno-unused-parameter",
 		"-Wno-language-extension-token",
@@ -120,6 +125,32 @@ int build(string[] args){
 int register(string[] args) {
 	Msg.Print($"Registering {sdlfriendlyname} library");
 	Msg.BeginIndent();
+	if (Host.IsLinux()) {
+		string incpath = "/usr/include/";
+		string libpath = "/usr/lib/x86_64-linux-gnu/";
+		if (System.IO.File.Exists(incpath + "SDL3/SDL.h") == false) {
+			Msg.PrintAndAbort("SDL3 headers not found. Install package: libsdl3-dev");
+		}
+		if (System.IO.File.Exists(libpath + "libSDL3.so") == false) {
+			if (System.IO.File.Exists("/usr/lib/libSDL3.so")) {
+				libpath = "/usr/lib/";
+			} else {
+				Msg.PrintAndAbort("SDL3 shared library not found. Install package: libsdl3-dev");
+			}
+		}
+		Msg.Print($"Registering {sdlfriendlyname} library under the name: " + sdl3name);
+		Msg.Print("  libname: SDL3");
+		Share.Register(sdl3name, "libname", "SDL3");
+		Msg.Print("  libpath: " + libpath);
+		Share.Register(sdl3name, "libpath", libpath);
+		Msg.Print("  incpath: " + incpath);
+		Share.Register(sdl3name, "incpath", incpath);
+		Msg.PrintTask("Registered system library: " + sdl3name);
+		Msg.PrintTaskSuccess(" done");
+		Msg.Print("---------------------------------------------------------------------------------------");
+		Msg.EndIndent();
+		return 0;
+	}
 	KValue OutputLib = KValue.Import("OutputLib");
 	OutputLib += sdl3name + "/";
 	// Create an instance of the clang tool.
@@ -166,13 +197,13 @@ int clean(string[] args){
 //
 private KList CreateSourceList(KValue sdl3path){
 	KList src = new KList();
-	
+
 	//=== Main sources
 	src += Glob(sdl3path+"src/*.c");
 
 	//=== sdl3 common source code
 	src += Glob(sdl3path+"src/atomic/*.c");
-	// Audio 
+	// Audio
 	src += Glob(sdl3path+"src/audio/*.c");
 	src += Glob(sdl3path+"src/audio/disk/*.c");
 	src += Glob(sdl3path+"src/audio/dummy/*.c");
@@ -206,7 +237,7 @@ private KList CreateSourceList(KValue sdl3path){
 	src += Glob(sdl3path+"src/joystick/dummy/*.c");
 	src += Glob(sdl3path+"src/joystick/hidapi/*.c");
 	src += Glob(sdl3path+"src/joystick/virtual/*.c");
-	// LibM (as per defined only is needed s_modf.c, we include all) 
+	// LibM (as per defined only is needed s_modf.c, we include all)
 	src += Glob(sdl3path+"src/libm/*.c");
 	// Locale
 	src += Glob(sdl3path+"src/locale/*.c");
@@ -230,7 +261,7 @@ private KList CreateSourceList(KValue sdl3path){
 	src += Glob(sdl3path+"src/sensor/dummy/*.c");
 	// Stdlib
 	src += Glob(sdl3path+"src/stdlib/*.c");
-	// Storage 
+	// Storage
 	src += Glob(sdl3path+"src/storage/*.c");
 	src += Glob(sdl3path+"src/storage/generic/*.c");
 	src += Glob(sdl3path+"src/storage/steam/*.c");
@@ -249,7 +280,7 @@ private KList CreateSourceList(KValue sdl3path){
 	src += Glob(sdl3path+"src/video/offscreen/*.c");
 	src += Glob(sdl3path+"src/video/yuv2rgb/*.c");
 
-	// 
+	//
 	//
 	if (Host.IsWindows()){
 		//=== SDL3 windows source code
@@ -263,7 +294,7 @@ private KList CreateSourceList(KValue sdl3path){
 		src += Glob(sdl3path+"src/core/windows/*.cpp");
 		// Dialog
 		src += Glob(sdl3path+"src/dialog/windows/*.c");
-		// Filesystem 
+		// Filesystem
 		src += Glob(sdl3path+"src/filesystem/windows/*.c");
 		// GPU
 		src += Glob(sdl3path+"src/gpu/d3d12/*.c");
@@ -281,9 +312,9 @@ private KList CreateSourceList(KValue sdl3path){
 		src += Glob(sdl3path+"src/loadso/windows/*.c");
 		// Locale
 		src += Glob(sdl3path+"src/locale/windows/*.c");
-		// Main 
+		// Main
 		src += Glob(sdl3path+"src/main/windows/*.c");
-		// Misc 
+		// Misc
 		src += Glob(sdl3path+"src/misc/windows/*.c");
 		// Power
 		src += Glob(sdl3path+"src/power/windows/*.c");
